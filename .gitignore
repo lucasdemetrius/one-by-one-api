@@ -1,0 +1,33 @@
+# Ambiente e segredos (perfis dev/prod) — NUNCA commitar. Só os *.example vão pro git.
+.env
+.env.*
+!*.example
+*.env.local
+
+# Binários compilados
+/bin/
+*.exe
+*.out
+
+# Diretório de build do Swagger (gerado via: swag init)
+/docs/swagger.json
+/docs/swagger.yaml
+/docs/docs.go
+
+# Dependências Go (go.sum é commitado, vendor não é necessário)
+/vendor/
+
+# IDE e sistema operacional
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Cobertura de testes
+coverage.out
+coverage.html

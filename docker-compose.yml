@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════
+# docker-compose.yml — OneByOne
+# Docker para tudo: sobe o banco MySQL 8.0 (com as migrations
+# aplicadas automaticamente) e a API Go compilada.
+#
+#   docker compose up --build      → sobe MySQL + API
+#   docker compose up -d mysql     → sobe só o banco (para rodar a API com go run)
+#   docker compose down            → para tudo (mantém os dados no volume)
+#   docker compose down -v         → para tudo e apaga os dados do banco
+# ═══════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+
+  # ─────────────────────────────────────────────────────
+  # API — backend Go (este repositório)
+  # Compilada pelo Dockerfile multi-stage e exposta na 8090.
+  # ─────────────────────────────────────────────────────
+  api:
+    build: .
+    container_name: onebyone-api
+    restart: unless-stopped
+    # Sobe a API só depois do banco estar saudável (healthcheck do mysql)
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    # Lê os segredos do .env (JWT_SECRET, credenciais AWS, etc.) e, em seguida,
+    # o bloco environment sobrescreve a conexão de banco para apontar ao
+    # container 'mysql' (na rede do Compose o host é o nome do serviço).
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: oneaone_user
+      DB_PASSWORD: oneaone_pass_2025
+      DB_NAME: onebyone
+      PORTA_API: "8090"
+
+  # ─────────────────────────────────────────────────────
+  # MySQL 8.0 — banco de dados principal da aplicação
+  # ─────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: onebyone-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: oneaone_root_2025
+      MYSQL_DATABASE: onebyone
+      MYSQL_USER: oneaone_user
+      MYSQL_PASSWORD: oneaone_pass_2025
+    ports:
+      # Host na 3307 para não conflitar com outro MySQL na 3306 (ex.: controleazul).
+      - "3307:3306"
+    volumes:
+      # Persistência dos dados entre reinicializações do container
+      - mysql_data:/var/lib/mysql
+      # Scripts .sql colocados aqui são executados automaticamente na criação do banco
+      - ./migrations:/docker-entrypoint-initdb.d
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "oneaone_user", "--password=oneaone_pass_2025"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  # Volume nomeado para persistir os dados do MySQL fora do ciclo de vida do container
+  mysql_data:
+    driver: local

@@ -1,0 +1,28 @@
+# Arquivos que NÃO devem entrar no contexto de build da imagem Docker.
+# Deixa o build mais rápido e evita vazar segredos para dentro da imagem.
+
+# Segredos — nunca entram na imagem (as variáveis vêm do docker-compose/ambiente)
+.env
+*.env.local
+
+# Controle de versão e metadados
+.git
+.gitignore
+
+# Documentação e arquivos de orientação
+README.md
+CLAUDE.md
+
+# Binários e artefatos locais
+/bin/
+*.exe
+*.out
+*.log
+coverage.out
+coverage.html
+
+# IDE e sistema operacional
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
