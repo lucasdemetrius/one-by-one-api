@@ -9,10 +9,13 @@
 *.exe
 *.out
 
-# Diretório de build do Swagger (gerado via: swag init)
+# Diretório de build do Swagger (gerado via: swag init).
+# IMPORTANTE: o docs/docs.go é VERSIONADO de propósito — o cmd/api/rotas.go importa o pacote
+# `onebyone-api/docs`, então sem esse arquivo o build em outra máquina (ex.: no Docker do
+# servidor) quebra com "package onebyone-api/docs is not in std". Os specs .json/.yaml não
+# são necessários para o build, então seguem ignorados.
 /docs/swagger.json
 /docs/swagger.yaml
-/docs/docs.go
 
 # Dependências Go (go.sum é commitado, vendor não é necessário)
 /vendor/
