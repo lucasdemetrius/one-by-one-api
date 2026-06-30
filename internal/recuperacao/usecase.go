@@ -3,7 +3,7 @@
 // Descrição: Regras do "esqueci minha senha". Gera link (token) + código, manda por
 //            e-mail, valida o token+código e troca a senha (delegando ao módulo usuario,
 //            que aplica a complexidade). Segurança: anti-enumeração (não revela se o
-//            e-mail existe), código cifrado, validade de 1h e uso único.
+//            e-mail existe), código cifrado, validade de 15 min e uso único.
 // Autor: OneByOne API
 // Criado em: 2026
 
@@ -30,6 +30,12 @@ var ErrCodigoInvalido = errors.New("código inválido")
 
 // maxTentativas: após esse número de códigos errados, o token é invalidado (anti-brute-force).
 const maxTentativas = 5
+
+// validadeLink: por quanto tempo o link + código de recuperação valem. Janela curta
+// (15 min) por segurança — reduz o tempo em que um e-mail interceptado seria útil e
+// estreita ainda mais a janela de brute-force do código de 6 dígitos. O texto do e-mail
+// usa este mesmo número (minutos), então nunca fica fora de sincronia com a regra.
+const validadeLink = 15 * time.Minute
 
 // UseCase define as operações de recuperação de senha.
 type UseCase interface {
@@ -75,7 +81,7 @@ func (uc *useCaseImpl) Solicitar(dto SolicitarDTO) error {
 		UsuarioID:  u.ID,
 		CodigoHash: string(hash),
 		Status:     StatusPendente,
-		ExpiraEm:   time.Now().Add(1 * time.Hour),
+		ExpiraEm:   time.Now().Add(validadeLink),
 		CriadoEm:   time.Now(),
 	}
 	if err := uc.repo.Criar(rec); err != nil {
@@ -85,7 +91,7 @@ func (uc *useCaseImpl) Solicitar(dto SolicitarDTO) error {
 	// E-mail com o link + código (dormente se o SMTP não estiver configurado).
 	if uc.emailSvc != nil {
 		link := uc.appURL + "/redefinir-senha/" + token
-		assunto, html := email.TemplateRecuperacaoSenha(u.Nome, link, codigo)
+		assunto, html := email.TemplateRecuperacaoSenha(u.Nome, link, codigo, int(validadeLink.Minutes()))
 		go func() { _ = uc.emailSvc.EnviarHTML([]string{u.Email}, assunto, html) }()
 	}
 	return nil
@@ -106,7 +112,7 @@ func (uc *useCaseImpl) Redefinir(token string, dto RedefinirDTO) error {
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(rec.CodigoHash), []byte(dto.Codigo)); err != nil {
 		// Código errado: conta a tentativa e, ao atingir o limite, invalida o token —
-		// trava o brute-force do código de 6 dígitos dentro da janela de 1 hora.
+		// trava o brute-force do código de 6 dígitos dentro da janela de 15 minutos.
 		_ = uc.repo.IncrementarTentativa(rec.ID)
 		if rec.Tentativas+1 >= maxTentativas {
 			_ = uc.repo.MarcarUsado(rec.ID, time.Now())

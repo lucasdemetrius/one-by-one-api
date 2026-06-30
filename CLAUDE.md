@@ -53,8 +53,16 @@ docker compose up --build
 
 Isso sobe **dois containers**:
 
-1. `onebyone-mysql` — banco MySQL 8.0, com as migrations aplicadas automaticamente
-2. `onebyone-api`   — a API Go compilada
+1. `onebyone-mysql` — banco MySQL 8.0 (sobe vazio)
+2. `onebyone-api`   — a API Go compilada, que **aplica as migrations no boot** (estilo Flyway)
+
+> **Migrations no boot (como o Flyway do Spring Boot):** a própria API aplica os
+> `migrations/*.sql` quando sobe — em banco **novo ou já existente** — controlando o que
+> já rodou na tabela `tb_migracoes`. Os `.sql` são **embutidos no binário** (`//go:embed`,
+> ver `migrations/embed.go`) e o runner vive em `pkg/database/migracao.go`. Ou seja: **não
+> precisa mais aplicar migration na mão** nem montar a pasta no MySQL — é só subir a API.
+> (Banco pré-existente criado pelo modo antigo é "baselined" na primeira subida: as
+> migrations já presentes são marcadas como aplicadas sem reexecutar.)
 
 Endereços depois de subir:
 
@@ -104,7 +112,7 @@ onebyone-api/
 │   ├── middleware/          ← auth JWT e auditoria
 │   ├── response/            ← helpers de resposta HTTP padronizada
 │   └── storage/             ← integração com o S3
-├── migrations/              ← scripts SQL (aplicados pelo MySQL na 1ª subida)
+├── migrations/              ← scripts SQL + embed.go (aplicados pela API no boot, estilo Flyway)
 ├── docs/                    ← arquivos gerados pelo Swagger (não editar à mão)
 ├── docker-compose.yml       ← orquestra MySQL + API
 ├── Dockerfile               ← build multi-stage da API
@@ -226,6 +234,7 @@ de negócio e dependências. Comece pelo módulo que vai mexer:
 | equipe | [README](internal/equipe/README.md) | Times da organização |
 | colaborador | [README](internal/colaborador/README.md) | Membros de uma equipe |
 | convite | [README](internal/convite/README.md) | Convite de liderado (link + código) |
+| recuperacao | [README](internal/recuperacao/README.md) | Esqueci minha senha (link + código de 6 dígitos, validade 15 min) |
 | blocotema | [README](internal/blocotema/README.md) | Conteúdo rico dos temas (texto/link/imagem/marco) |
 | classificacao | [README](internal/classificacao/README.md) | Matriz 9-box (desempenho × potencial) |
 | pdi | [README](internal/pdi/README.md) | Plano de Desenvolvimento Individual (objetivos + prazos) |
@@ -241,6 +250,9 @@ de negócio e dependências. Comece pelo módulo que vai mexer:
 | valorregistro | [README](internal/valorregistro/README.md) | Respostas preenchidas |
 | notificacao | [README](internal/notificacao/README.md) | Sino in-app + cron de avisos da agenda + preferências |
 | ia | [README](internal/ia/README.md) | IA plugável BYOK (Claude/OpenAI/DeepSeek/Grok) — chave AES-GCM |
+| ajuda | [README](internal/ajuda/README.md) | Central de Ajuda: tópicos + tour + assistente de IA (plataforma → BYOK) |
+| admin | [README](internal/admin/README.md) | Painel da plataforma (conta ADMIN): contas, acessos (estilo GA), uso, crescimento, saúde |
+| feedback | [README](internal/feedback/README.md) | Reações dos usuários (curti/não curti/irritado) + painel `/admin/feedbacks` |
 | auditoria | [README](internal/auditoria/README.md) | Trilha de atividades |
 
 **Pacotes de infraestrutura (`pkg/`):**
@@ -407,6 +419,9 @@ Lidas em `pkg/config/config.go`. **Segredos nunca são versionados** — só os 
 | `AWS_ACCESS_KEY_ID` …  | credenciais e bucket S3 das fotos         | obrigatório p/ fotos | idem  |
 | `AMBIENTE`             | perfil (`desenvolvimento`/`producao`)     | `desenvolvimento`| `producao` |
 | `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET` | reCAPTCHA anti-bot — **vazio = desligado** | opcional | opcional |
+| `ADMIN_EMAIL`          | conta de ADMIN da plataforma (padrão `admin@admin.com.br`) | opcional | opcional |
+| `ADMIN_SENHA`          | cria a conta admin no boot se ainda não existir (vazio = só promove) | opcional | opcional |
+| `IA_PLATAFORMA_PROVEDOR` / `IA_PLATAFORMA_CHAVE` | IA da **Ajuda** p/ todos os usuários — **vazio = usa BYOK/curado** | opcional | opcional |
 
 > No container, o Compose sobrescreve `DB_HOST` (`localhost`→`mysql`) e define o `AMBIENTE`
 > (perfil). O restante vem do `.env.dev` (dev) ou `.env` (prod). O **reCAPTCHA** fica dormente
@@ -440,7 +455,8 @@ swag init -g cmd/api/main.go -o docs
 ### Para criar um módulo novo (passo a passo)
 
 1. Crie `internal/<nome>/` com os 6 arquivos do padrão (seção 6).
-2. Escreva a migration em `migrations/00X_*.sql`.
+2. Escreva a migration em `migrations/00X_*.sql` (numeração sequencial). Ela é **aplicada
+   sozinha no próximo boot da API** (embed + runner) — não precisa rodar nada à mão.
 3. No `rotas.go`, adicione o trio (`Novo...`) + `RegistrarRotas`, na ordem certa
    se houver dependência entre módulos.
 4. Anote os comentários Swagger nos handlers e rode `swag init`.

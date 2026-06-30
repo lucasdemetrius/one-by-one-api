@@ -26,21 +26,39 @@ type visitante struct {
 }
 
 // LimitadorTaxa devolve um middleware que limita cada IP a `porMinuto` requisições por
-// minuto, com pico de `burst`. Excedeu → 429 com mensagem amigável. Os IPs inativos são
-// limpos periodicamente para não vazar memória.
+// minuto, com pico de `burst`. Excedeu → 429 com mensagem amigável.
 func LimitadorTaxa(porMinuto float64, burst float64) gin.HandlerFunc {
+	return limitadorPorChave(porMinuto, burst, func(ctx *gin.Context) string { return ctx.ClientIP() })
+}
+
+// LimitadorTaxaPorUsuario limita por USUÁRIO autenticado (ChaveUsuarioID), caindo no IP
+// quando não há usuário no contexto. Use em rotas autenticadas CARAS (ex.: assistente de IA,
+// gravação de feedback): assim um único usuário não abusa só trocando de IP. DEVE rodar
+// DEPOIS do AutenticarJWT (senão o ChaveUsuarioID ainda não está no contexto).
+func LimitadorTaxaPorUsuario(porMinuto float64, burst float64) gin.HandlerFunc {
+	return limitadorPorChave(porMinuto, burst, func(ctx *gin.Context) string {
+		if uid := ctx.GetString(ChaveUsuarioID); uid != "" {
+			return "u:" + uid
+		}
+		return "ip:" + ctx.ClientIP()
+	})
+}
+
+// limitadorPorChave é o token-bucket por IP/sessão genérico: `chaveDe` decide a chave do
+// balde (IP, usuário, etc.). As chaves inativas são limpas periodicamente (sem vazar memória).
+func limitadorPorChave(porMinuto float64, burst float64, chaveDe func(*gin.Context) string) gin.HandlerFunc {
 	var mu sync.Mutex
 	visitantes := map[string]*visitante{}
 	taxaPorSeg := porMinuto / 60.0
 
-	// Faxina: remove IPs sem atividade recente.
+	// Faxina: remove chaves sem atividade recente.
 	go func() {
 		for {
 			time.Sleep(5 * time.Minute)
 			mu.Lock()
-			for ip, v := range visitantes {
+			for k, v := range visitantes {
 				if time.Since(v.ultimaAt) > 10*time.Minute {
-					delete(visitantes, ip)
+					delete(visitantes, k)
 				}
 			}
 			mu.Unlock()
@@ -48,14 +66,14 @@ func LimitadorTaxa(porMinuto float64, burst float64) gin.HandlerFunc {
 	}()
 
 	return func(ctx *gin.Context) {
-		ip := ctx.ClientIP()
+		chave := chaveDe(ctx)
 		agora := time.Now()
 
 		mu.Lock()
-		v, ok := visitantes[ip]
+		v, ok := visitantes[chave]
 		if !ok {
 			v = &visitante{tokens: burst, ultimaAt: agora}
-			visitantes[ip] = v
+			visitantes[chave] = v
 		} else {
 			// Repõe tokens conforme o tempo decorrido (até o teto `burst`).
 			v.tokens += agora.Sub(v.ultimaAt).Seconds() * taxaPorSeg

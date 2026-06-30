@@ -17,7 +17,7 @@ func ParaRespostaDTO(u Usuario, fotoURL *string) UsuarioRespostaDTO {
 		Nome:       u.Nome,
 		Email:      u.Email,
 		Role:       u.Role,
-		CriadoEm:  u.CriadoEm,
+		CriadoEm:   u.CriadoEm,
 		AlteradoEm: u.AlteradoEm,
 		FotoURL:    fotoURL,
 	}

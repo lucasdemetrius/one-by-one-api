@@ -94,6 +94,11 @@ func (c *Controller) Login(ctx *gin.Context) {
 		return
 	}
 
+	// Atribui o login ao usuário no contexto: a rota é pública (sem authMiddleware), então
+	// o middleware global de auditoria não saberia QUEM logou. Setando a chave aqui, o evento
+	// LOGIN passa a ter usuario_id — é o que alimenta os "acessos por usuário" no painel admin.
+	ctx.Set(middleware.ChaveUsuarioID, resultado.Usuario.ID)
+
 	response.Sucesso(ctx, resultado)
 }
 

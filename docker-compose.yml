@@ -58,8 +58,9 @@ services:
     volumes:
       # Persistência dos dados entre reinicializações do container
       - mysql_data:/var/lib/mysql
-      # Scripts .sql colocados aqui são executados automaticamente na criação do banco
-      - ./migrations:/docker-entrypoint-initdb.d
+      # As migrations NÃO são montadas aqui: quem as aplica é a API no boot (estilo Flyway,
+      # ver pkg/database/migracao.go). Este compose sobe SÓ o banco — útil para `go run` da API,
+      # que ao subir aplica as migrations pendentes sozinha.
     command: >
       --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4

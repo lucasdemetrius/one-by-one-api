@@ -35,6 +35,22 @@ func primeiroNome(nome string) string {
 	return nome
 }
 
+// caixasCodigo renderiza um código (ex.: "048213") como UMA CAIXA POR DÍGITO, lado a
+// lado — o mesmo visual do input "um campo por dígito" da tela de redefinição. Tabela
+// com estilos inline porque clientes de e-mail (Gmail, Outlook) ignoram <style>/flex.
+func caixasCodigo(codigo string) string {
+	var celulas strings.Builder
+	for _, d := range codigo {
+		celulas.WriteString(fmt.Sprintf(
+			`<td style="padding:0 5px;">`+
+				`<div style="width:46px;height:58px;line-height:58px;text-align:center;`+
+				`font-size:28px;font-weight:800;color:#211c33;background:#f3f0ff;`+
+				`border:2px solid #e4ddff;border-radius:12px;">%c</div></td>`, d))
+	}
+	return `<table cellpadding="0" cellspacing="0" align="center" style="margin:6px auto 18px;">` +
+		`<tr>` + celulas.String() + `</tr></table>`
+}
+
 // TemplateBoasVindas devolve (assunto, html) do e-mail de boas-vindas do gestor.
 func TemplateBoasVindas(nome, appURL string) (string, string) {
 	conteudo := fmt.Sprintf(`
@@ -63,17 +79,20 @@ func TemplateConvite(nomeLiderado, link, codigo string) (string, string) {
 }
 
 // TemplateRecuperacaoSenha devolve (assunto, html) do e-mail de recuperação de senha,
-// com o link de redefinição e o código (contra-senha).
-func TemplateRecuperacaoSenha(nome, link, codigo string) (string, string) {
+// com o link de redefinição e o código (contra-senha) renderizado UMA CAIXA POR DÍGITO
+// — o mesmo visual da tela de redefinição. `minutos` é a validade do link (mantém o
+// texto sempre em sincronia com a regra do servidor, hoje 15 min).
+func TemplateRecuperacaoSenha(nome, link, codigo string, minutos int) (string, string) {
 	conteudo := fmt.Sprintf(`
     <h1 style="margin:0 0 10px;font-size:26px;">Vamos redefinir sua senha, %s 🔑</h1>
     <p style="font-size:16px;line-height:1.6;color:#4a4560;">Recebemos um pedido para criar uma nova senha da sua conta no <strong>OneByOne</strong>.
-    Clique no botão e, se pedir, informe o código abaixo.</p>
-    <p style="margin:26px 0;"><a href="%s" style="background:linear-gradient(135deg,#7c5cff,#fb7185);color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:12px;font-weight:700;display:inline-block;">Redefinir minha senha</a></p>
-    <p style="font-size:15px;color:#4a4560;margin:0 0 6px;">Seu código de segurança:</p>
-    <p style="font-size:30px;letter-spacing:8px;font-weight:800;color:#211c33;background:#f3f0ff;border-radius:12px;padding:14px 0;text-align:center;margin:0 0 18px;">%s</p>
-    <p style="font-size:13px;color:#6f6886;">O link vale por 1 hora e só pode ser usado uma vez. Se você não pediu isso, pode ignorar este e-mail — sua senha continua a mesma.</p>
-  `, primeiroNome(nome), link, codigo)
+    Clique no botão abaixo e informe o <strong>código de segurança</strong> que está logo aqui no e-mail.</p>
+    <p style="margin:24px 0 18px;"><a href="%s" style="background:linear-gradient(135deg,#7c5cff,#fb7185);color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:12px;font-weight:700;display:inline-block;">Redefinir minha senha</a></p>
+    <p style="font-size:15px;color:#4a4560;margin:0 0 4px;text-align:center;">Seu código de segurança:</p>
+    %s
+    <p style="font-size:13px;color:#6f6886;text-align:center;">⏱️ Por segurança, o link e o código valem por <strong>%d minutos</strong> e só podem ser usados uma vez.</p>
+    <p style="font-size:13px;color:#6f6886;margin-top:14px;">Se você não pediu isso, pode ignorar este e-mail com tranquilidade — sua senha continua a mesma.</p>
+  `, primeiroNome(nome), link, caixasCodigo(codigo), minutos)
 	return "Recuperação de senha — OneByOne 🔑", layout(conteudo)
 }
 

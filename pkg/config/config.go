@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+	"onebyone-api/pkg/texto"
 )
 
 // Config armazena todas as configurações da aplicação carregadas via variáveis de ambiente
@@ -65,6 +66,21 @@ type Config struct {
 	// fica só no servidor.
 	RecaptchaSiteKey string
 	RecaptchaSecret  string
+	// ── Conta de ADMIN da plataforma (super-usuário global de monitoração) ──
+	// AdminEmail é o e-mail da conta admin (padrão admin@admin.com.br). No boot, a conta
+	// com esse e-mail é garantida como ADMIN (promovida se já existir).
+	AdminEmail string
+	// AdminSenha, se preenchida, permite CRIAR a conta admin no boot caso ela ainda não
+	// exista. Vazia = não cria (só promove uma conta já existente) — sem senha padrão por
+	// segurança. Use uma senha forte e troque-a depois pelo fluxo normal.
+	AdminSenha string
+	// ── IA de PLATAFORMA (opcional) — usada pela Ajuda com IA para TODOS os usuários ──
+	// Diferente da IA BYOK por gestor (módulo ia), esta é a chave da plataforma: quando
+	// preenchida, o assistente de Ajuda responde a qualquer usuário (gestor, RH, liderado)
+	// sem depender da chave individual. Vazia = a Ajuda cai no BYOK do usuário (se houver)
+	// ou no conteúdo curado. Provedor: CLAUDE | OPENAI | DEEPSEEK | GROK.
+	IAPlataformaProvedor string
+	IAPlataformaChave    string
 }
 
 // Carregar lê as variáveis de ambiente do arquivo .env (ou do ambiente do sistema)
@@ -96,28 +112,32 @@ func Carregar() (*Config, error) {
 	}
 
 	cfg := &Config{
-		DBHost:             getEnv("DB_HOST", "localhost"),
-		DBPort:             getEnv("DB_PORT", "3306"),
-		DBUser:             getEnv("DB_USER", "root"),
-		DBPassword:         getEnv("DB_PASSWORD", ""),
-		DBName:             getEnv("DB_NAME", "onebyone"),
-		JWTSecret:          getEnv("JWT_SECRET", ""),
-		JWTExpiracaoHoras:  expiracaoHoras,
-		PortaAPI:           getEnv("PORTA_API", "8080"),
-		AWSAccessKeyID:     getEnv("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
-		AWSRegion:          getEnv("AWS_REGION", "us-east-1"),
-		AWSBucket:          getEnv("AWS_BUCKET", "controleazul"),
-		AWSPrefixo:         getEnv("AWS_PREFIXO", "one-by-one"),
-		SMTPHost:           getEnv("SMTP_HOST", ""),
-		SMTPPort:           getEnv("SMTP_PORT", "587"),
-		SMTPUser:           getEnv("SMTP_USER", ""),
-		SMTPPassword:       getEnv("SMTP_PASSWORD", ""),
-		SMTPRemetente:      getEnv("SMTP_REMETENTE", ""),
-		AppURL:             getEnv("APP_URL", "http://localhost:3100"),
-		Ambiente:           getEnv("AMBIENTE", "desenvolvimento"),
-		RecaptchaSiteKey:   getEnv("RECAPTCHA_SITE_KEY", ""),
-		RecaptchaSecret:    getEnv("RECAPTCHA_SECRET", ""),
+		DBHost:               getEnv("DB_HOST", "localhost"),
+		DBPort:               getEnv("DB_PORT", "3306"),
+		DBUser:               getEnv("DB_USER", "root"),
+		DBPassword:           getEnv("DB_PASSWORD", ""),
+		DBName:               getEnv("DB_NAME", "onebyone"),
+		JWTSecret:            getEnv("JWT_SECRET", ""),
+		JWTExpiracaoHoras:    expiracaoHoras,
+		PortaAPI:             getEnv("PORTA_API", "8080"),
+		AWSAccessKeyID:       getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey:   getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSRegion:            getEnv("AWS_REGION", "us-east-1"),
+		AWSBucket:            getEnv("AWS_BUCKET", "controleazul"),
+		AWSPrefixo:           getEnv("AWS_PREFIXO", "one-by-one"),
+		SMTPHost:             getEnv("SMTP_HOST", ""),
+		SMTPPort:             getEnv("SMTP_PORT", "587"),
+		SMTPUser:             getEnv("SMTP_USER", ""),
+		SMTPPassword:         getEnv("SMTP_PASSWORD", ""),
+		SMTPRemetente:        getEnv("SMTP_REMETENTE", ""),
+		AppURL:               getEnv("APP_URL", "http://localhost:3100"),
+		Ambiente:             getEnv("AMBIENTE", "desenvolvimento"),
+		RecaptchaSiteKey:     getEnv("RECAPTCHA_SITE_KEY", ""),
+		RecaptchaSecret:      getEnv("RECAPTCHA_SECRET", ""),
+		AdminEmail:           texto.NormalizarEmail(getEnv("ADMIN_EMAIL", "admin@admin.com.br")),
+		AdminSenha:           getEnv("ADMIN_SENHA", ""),
+		IAPlataformaProvedor: getEnv("IA_PLATAFORMA_PROVEDOR", ""),
+		IAPlataformaChave:    getEnv("IA_PLATAFORMA_CHAVE", ""),
 	}
 
 	// Travas de segurança (fail-fast): o app NÃO sobe com configuração insegura.

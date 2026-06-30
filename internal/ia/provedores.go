@@ -48,6 +48,18 @@ const modeloClaude = "claude-sonnet-4-6"
 
 const tempoLimite = 45 * time.Second
 
+// CompletarComChave é o ponto de entrada PÚBLICO da abstração de provedores: fala com a
+// IA usando um provedor + chave passados na hora (em vez da config BYOK guardada por
+// usuário). É usado pela Ajuda com IA quando há uma chave de PLATAFORMA no .env — assim o
+// assistente responde a qualquer usuário (gestor, RH ou liderado) sem depender da chave
+// individual de cada um. Valida o provedor antes de chamar.
+func CompletarComChave(provedor, chave, sistema, prompt string) (string, error) {
+	if !ProvedorValido(provedor) {
+		return "", ErrProvedorInvalido
+	}
+	return completar(provedor, chave, sistema, prompt)
+}
+
 // completar envia um prompt ao provedor escolhido e devolve o texto da resposta.
 // `sistema` é a instrução de sistema (papel/contexto); `prompt` é o pedido do usuário.
 func completar(provedor, chave, sistema, prompt string) (string, error) {

@@ -84,11 +84,26 @@ func NovoUseCase(repo Repositorio, cfg *config.Config, armazenamento storage.Arm
 	return &useCaseImpl{repo: repo, cfg: cfg, armazenamento: armazenamento, emailSvc: emailSvc}
 }
 
+// emailReservado indica se o e-mail é o da conta de ADMIN da plataforma (cfg.AdminEmail).
+// Esse e-mail é gerenciado APENAS pelo seed de boot (admin.GarantirContaAdmin): nenhuma via
+// pública (auto-cadastro, convite, edição de perfil ou cadastro pelo RH) pode tomá-lo. Sem
+// essa reserva, alguém poderia registrar a conta com esse e-mail ANTES de o operador subir o
+// admin e, no próximo boot, o seed promoveria essa conta a ADMIN (escalonamento de privilégio).
+func (uc *useCaseImpl) emailReservado(email string) bool {
+	return uc.cfg != nil && uc.cfg.AdminEmail != "" && email == uc.cfg.AdminEmail
+}
+
 // Criar verifica unicidade do e-mail, gera UUID, aplica hash bcrypt na senha
 // e persiste o novo usuário. Retorna o DTO sem expor dados sensíveis.
 func (uc *useCaseImpl) Criar(dto CriarUsuarioDTO) (UsuarioRespostaDTO, error) {
 	// Normaliza o e-mail (minúsculo + sem espaços) para gravar e comparar de forma canônica.
 	dto.Email = texto.NormalizarEmail(dto.Email)
+
+	// O e-mail do ADMIN da plataforma é reservado: nenhuma via de criação pode usá-lo
+	// (anti-escalonamento). Responde como "já em uso" — não revela que é a conta de admin.
+	if uc.emailReservado(dto.Email) {
+		return UsuarioRespostaDTO{}, fmt.Errorf("já existe um usuário com este e-mail")
+	}
 
 	// Verifica se o e-mail já está em uso por outro usuário ativo para evitar duplicatas
 	if _, err := uc.repo.BuscarPorEmail(dto.Email); err == nil {
@@ -184,6 +199,10 @@ func (uc *useCaseImpl) Registrar(dto CriarUsuarioDTO) (UsuarioRespostaDTO, error
 // corpo da requisição — é isso que impede um RH de "adotar" gestores de outro tenant.
 func (uc *useCaseImpl) CriarGestorParaRH(dto CriarUsuarioDTO, rhID string) (UsuarioRespostaDTO, error) {
 	dto.Email = texto.NormalizarEmail(dto.Email)
+	// E-mail do ADMIN é reservado (anti-escalonamento) — o RH também não pode atribuí-lo.
+	if uc.emailReservado(dto.Email) {
+		return UsuarioRespostaDTO{}, fmt.Errorf("já existe um usuário com este e-mail")
+	}
 	if _, err := uc.repo.BuscarPorEmail(dto.Email); err == nil {
 		return UsuarioRespostaDTO{}, fmt.Errorf("já existe um usuário com este e-mail")
 	}
@@ -266,6 +285,11 @@ func (uc *useCaseImpl) Atualizar(id string, solicitanteID string, dto AtualizarU
 		dto.Email = texto.NormalizarEmail(dto.Email)
 	}
 	if dto.Email != "" && dto.Email != atual.Email {
+		// O e-mail do ADMIN é reservado: ninguém pode RENOMEAR sua conta para ele e ser
+		// promovido a ADMIN no próximo boot (anti-escalonamento). Responde como "em uso".
+		if uc.emailReservado(dto.Email) {
+			return UsuarioRespostaDTO{}, fmt.Errorf("este e-mail já está em uso por outro usuário")
+		}
 		// Garante que o novo e-mail não pertence a outro usuário ativo
 		existente, err := uc.repo.BuscarPorEmail(dto.Email)
 		if err == nil && existente.ID != id {

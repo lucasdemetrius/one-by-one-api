@@ -23,7 +23,7 @@ type Recuperacao struct {
 	CodigoHash string     `db:"codigo_hash"` // hash bcrypt do código (contra-senha)
 	Status     string     `db:"status"`      // PENDENTE | USADO
 	Tentativas int        `db:"tentativas"`  // códigos errados (token é invalidado ao atingir o limite)
-	ExpiraEm   time.Time  `db:"expira_em"`   // validade (1 hora)
+	ExpiraEm   time.Time  `db:"expira_em"`   // validade (15 minutos, ver const validadeLink)
 	CriadoEm   time.Time  `db:"criado_em"`
 	UsadoEm    *time.Time `db:"usado_em"`
 }

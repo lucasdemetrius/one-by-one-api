@@ -73,6 +73,10 @@ func extrairAcaoEntidade(metodo, path string) (acao, entidade string) {
 			return "UPLOAD_FOTO", entidade
 		case "eventos":
 			return "", "" // eventos de UI não precisam de auditoria dupla
+		case "perguntar":
+			return "", "" // perguntas à IA da Ajuda não alteram estado (e podem ser muitas)
+		case "feedback":
+			return "", "" // reações têm tabela própria (tb_feedbacks); não inflam a auditoria
 		// Sub-recursos do colaborador: entidade mais específica para a linha do tempo.
 		case "blocos", "blocos-imagem":
 			entidade = "tema_bloco"

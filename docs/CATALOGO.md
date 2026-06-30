@@ -745,6 +745,76 @@ Registra trilha de atividades dos usuários: automaticamente por middleware em e
 - POST /eventos: usuario_id, IP, User-Agent lidos do contexto HTTP, nunca do JSON
 - GET /colaboradores/:id/timeline: colaboradorID obrigatório no path; posse checada antes de listar
 
+### Plataforma, ajuda & recuperação
+
+#### 12.22 Recuperação de senha (`recuperacao`) — atualizado
+
+Fluxo público "esqueci minha senha" (link + código de 6 dígitos). **Validade reduzida para
+15 minutos** (`const validadeLink`); o e-mail renderiza o código **uma caixa por dígito**.
+
+| Rota | O que faz | Acesso |
+|---|---|---|
+| `POST /auth/recuperar-senha` | Pede o link (sempre responde igual — anti-enumeração) | público (rate-limit + reCAPTCHA) |
+| `GET /recuperacoes/:token` | Diz se o link ainda é válido (`{valido}`) | público |
+| `POST /recuperacoes/:token/redefinir` | Valida token+código e troca a senha | público |
+
+**Regras:** validade 15 min; uso único; código só em hash bcrypt; máx. 5 tentativas de
+código erradas invalidam o token; trocar a senha revoga as sessões (token_version).
+Detalhe em `internal/recuperacao/README.md`.
+
+#### 12.23 Central de Ajuda (`ajuda`)
+
+Ajuda para todos os usuários: **conteúdo curado** (tópicos + tour, funcionam sem IA) +
+**assistente de IA** que resolve a chave em cascata **plataforma → BYOK → curado**.
+
+| Rota | O que faz | Acesso |
+|---|---|---|
+| `GET /ajuda/topicos` | Tópicos visíveis para o papel do usuário | JWT |
+| `GET /ajuda/topicos/:id` | Um tópico (conteúdo em markdown) | JWT |
+| `GET /ajuda/tour` | Tour de boas-vindas por papel | JWT |
+| `GET /ajuda/ia/status` | `{ia_disponivel}` para mostrar/ocultar o chat | JWT |
+| `POST /ajuda/perguntar` | Pergunta livre → resposta da IA | JWT + rate-limit próprio |
+
+**Regras:** chave de plataforma (`IA_PLATAFORMA_*`) atende qualquer usuário; senão usa a IA
+BYOK do gestor/RH; senão devolve mensagem amigável. Pergunta máx. 1000 chars; não auditada;
+nunca vaza erro técnico nem a chave. Conteúdo curado em `conteudo.go`.
+
+#### 12.24 Painel ADMIN da plataforma (`admin`)
+
+Monitoração global, **só leitura agregada**, exclusiva da conta **ADMIN** (papel novo,
+migration 023). Sem tabela nova — agrega `tb_usuarios`, `tb_auditoria`, `tb_onebyone`,
+`tb_agendamentos` e a estrutura.
+
+| Rota | O que faz | Acesso |
+|---|---|---|
+| `GET /admin/visao-geral` | KPIs: contas por papel, estrutura, atividade (DAU/WAU/MAU, logins, 1:1) | JWT + ApenasAdmin |
+| `GET /admin/contas` | Lista paginada de contas com resumo de uso (filtros papel/busca) | JWT + ApenasAdmin |
+| `GET /admin/acessos` | Série temporal (estilo Google Analytics): logins/ativos/eventos por dia | JWT + ApenasAdmin |
+| `GET /admin/uso` | Top funcionalidades + por hora + por dia da semana + por papel | JWT + ApenasAdmin |
+| `GET /admin/crescimento` | Novos cadastros por dia/papel + acumulado + 1:1 realizados | JWT + ApenasAdmin |
+| `GET /admin/saude` | Engajamento/adoção + ranking de gestores | JWT + ApenasAdmin |
+
+**Regras:** `ApenasAdmin` protege todo o grupo; o login agora é **atribuído ao usuário** na
+auditoria (analytics de acessos fiéis); a conta admin é garantida no boot
+(`GarantirContaAdmin`, e-mail `ADMIN_EMAIL`); parâmetros `dias`/`limite` são limitados;
+séries vêm com buracos preenchidos com zero. Detalhe em `internal/admin/README.md`.
+
+#### 12.25 Feedback dos usuários (`feedback`)
+
+Reações rápidas (curti / não curti / irritado) com contexto e comentário opcionais —
+coleta a satisfação dos usuários e leva ao dashboard de gestão. Tabela `tb_feedbacks`
+(migration **024**, collation fixada em utf8mb4_unicode_ci para o JOIN com tb_usuarios).
+
+| Rota | O que faz | Acesso |
+|---|---|---|
+| `POST /feedback` | Registra uma reação (`reacao` + `contexto`/`comentario`/`pagina` opcionais) | JWT (qualquer papel) |
+| `GET /admin/feedbacks` | Painel: totais, índice de satisfação, série por reação, por contexto, comentários recentes | JWT + ApenasAdmin |
+
+**Regras:** `usuario_id` vem do JWT (nunca do corpo); `reacao` ∈ {CURTI, NAO_CURTI,
+IRRITADO}; log append-only (não é toggle); reação **não** é auditada (tem tabela própria);
+série com buracos preenchidos com zero; `recentes` traz só feedbacks com comentário, já com
+o autor. Detalhe em `internal/feedback/README.md`.
+
 ### Infraestrutura & fiação
 
 #### 12.21 Infraestrutura (pkg/) e fiação (cmd/api/) (`infra`)

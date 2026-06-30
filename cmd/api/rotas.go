@@ -17,7 +17,9 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"onebyone-api/internal/acompanhamento"
+	"onebyone-api/internal/admin"
 	"onebyone-api/internal/agendamento"
+	"onebyone-api/internal/ajuda"
 	"onebyone-api/internal/aovivo"
 	"onebyone-api/internal/auditoria"
 	"onebyone-api/internal/blocotema"
@@ -25,6 +27,7 @@ import (
 	"onebyone-api/internal/colaborador"
 	"onebyone-api/internal/convite"
 	"onebyone-api/internal/equipe"
+	"onebyone-api/internal/feedback"
 	"onebyone-api/internal/ia"
 	"onebyone-api/internal/notificacao"
 	"onebyone-api/internal/onebyone"
@@ -61,6 +64,10 @@ func ConfigurarRotas(cfg *config.Config, db *sqlx.DB, s3Svc storage.Armazenament
 	// Serviço de e-mail (SMTP). Dormente se as variáveis SMTP_* não estiverem no .env.
 	emailSvc := email.NovoServico(cfg)
 
+	// Garante a conta de ADMIN da plataforma (promove se já existir; cria se ADMIN_SENHA
+	// estiver no .env). Idempotente e defensivo — só loga em caso de erro, nunca derruba o boot.
+	admin.GarantirContaAdmin(db, cfg.AdminEmail, cfg.AdminSenha)
+
 	// ─── Módulo: auditoria ───────────────────────────────────────────────────────
 	// Montado primeiro porque o seu UseCase é usado pelo middleware global de
 	// auditoria, que precisa estar registrado antes das demais rotas.
@@ -86,6 +93,13 @@ func ConfigurarRotas(cfg *config.Config, db *sqlx.DB, s3Svc storage.Armazenament
 	// auth/recuperação/convite (os cabeçalhos de segurança já saem no router, cobrindo tudo).
 	api.Use(middleware.LimitadorTaxa(300, 120))
 	limiteAuth := middleware.LimitadorTaxa(12, 8)
+	// Limite do assistente de IA da Ajuda (chamada externa com CUSTO): POR USUÁRIO (não só por
+	// IP), para um único usuário não queimar a chave de IA da plataforma trocando de IP.
+	// (Defesa de instância única; para um teto de orçamento global, configure também a cota no
+	// provedor de IA e/ou restrinja a IA de plataforma a papéis pagantes.)
+	limiteIA := middleware.LimitadorTaxaPorUsuario(30, 10)
+	// Limite da gravação de feedback (append-only): por usuário, evita inflar a tabela.
+	limiteFeedback := middleware.LimitadorTaxaPorUsuario(20, 10)
 	recaptchaMW := middleware.VerificarRecaptcha(cfg)
 
 	// Middleware de auditoria aplicado globalmente — grava toda operação de escrita
@@ -264,6 +278,30 @@ func ConfigurarRotas(cfg *config.Config, db *sqlx.DB, s3Svc storage.Armazenament
 	iaUseCase := ia.NovoUseCase(iaRepo, cfg.JWTSecret)
 	iaController := ia.NovoController(iaUseCase)
 	iaController.RegistrarRotas(api, authMiddleware)
+
+	// ─── Módulo: ajuda (Central de Ajuda com IA) ─────────────────────────────────
+	// Conteúdo curado (tópicos + tour, funcionam sem IA) + assistente de IA que resolve a
+	// chave em cascata: PLATAFORMA (cfg.IAPlataforma*) → BYOK (reusa o iaUseCase) → curado.
+	// Montado DEPOIS do módulo ia (depende do iaUseCase para o fallback BYOK).
+	ajudaUseCase := ajuda.NovoUseCase(iaUseCase, cfg.IAPlataformaProvedor, cfg.IAPlataformaChave)
+	ajudaController := ajuda.NovoController(ajudaUseCase)
+	ajudaController.RegistrarRotas(api, authMiddleware, limiteIA)
+
+	// ─── Módulo: admin (painel da plataforma — só a conta ADMIN) ─────────────────
+	// Leitura agregada da plataforma inteira: contas, acessos (estilo Google Analytics),
+	// uso, crescimento e saúde. Protegido por ApenasAdmin (dentro do RegistrarRotas).
+	adminRepo := admin.NovoRepositorio(db)
+	adminUseCase := admin.NovoUseCase(adminRepo)
+	adminController := admin.NovoController(adminUseCase)
+	adminController.RegistrarRotas(api, authMiddleware)
+
+	// ─── Módulo: feedback (reações dos usuários → dashboard de gestão) ───────────
+	// Escrita aberta a qualquer usuário logado (POST /feedback); o painel agregado
+	// (GET /admin/feedbacks) é protegido por ApenasAdmin dentro do RegistrarRotas.
+	feedbackRepo := feedback.NovoRepositorio(db)
+	feedbackUseCase := feedback.NovoUseCase(feedbackRepo)
+	feedbackController := feedback.NovoController(feedbackUseCase)
+	feedbackController.RegistrarRotas(api, authMiddleware, limiteFeedback)
 
 	// ─── Módulo: auditoria (rotas) ───────────────────────────────────────────────
 	// O Controller já foi criado lá no início; aqui só registramos suas rotas.

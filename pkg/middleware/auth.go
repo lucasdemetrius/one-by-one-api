@@ -31,7 +31,7 @@ const ChaveUsuarioRole = "usuario_role"
 type ClaimsJWT struct {
 	// UsuarioID é o UUID do usuário autenticado
 	UsuarioID string `json:"usuario_id"`
-	// Role é o papel do usuário: LIDER, COLABORADOR ou RH
+	// Role é o papel do usuário: LIDER, COLABORADOR, RH ou ADMIN
 	Role string `json:"role"`
 	// Versao é a versão do token do usuário no momento da emissão (revogação de sessão)
 	Versao int `json:"versao"`
@@ -145,6 +145,23 @@ func ApenasRH() gin.HandlerFunc {
 		role, existe := ctx.Get(ChaveUsuarioRole)
 		if !existe || role != "RH" {
 			response.ErroProibido(ctx, "acesso restrito ao RH")
+			ctx.Abort()
+			return
+		}
+		ctx.Next()
+	}
+}
+
+// ApenasAdmin restringe a rota ao ADMIN da plataforma (super-usuário global de
+// monitoração). É o portão de todo o módulo /admin: dashboards de uso, acessos e
+// indicadores da plataforma inteira. Como o ADMIN só age em LEITURA agregada (sem
+// :id de recurso de outro usuário), o papel no JWT já é prova suficiente — não há
+// posse a checar como nos demais módulos.
+func ApenasAdmin() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		role, existe := ctx.Get(ChaveUsuarioRole)
+		if !existe || role != "ADMIN" {
+			response.ErroProibido(ctx, "acesso restrito ao administrador")
 			ctx.Abort()
 			return
 		}

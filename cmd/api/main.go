@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"log"
 
+	migracoes "onebyone-api/migrations"
 	"onebyone-api/pkg/config"
 	"onebyone-api/pkg/database"
 	"onebyone-api/pkg/storage"
@@ -52,6 +53,13 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("conexão com o banco de dados estabelecida com sucesso")
+
+	// ─── 2.1 Aplica as migrations pendentes no boot (estilo Flyway) ──────────────
+	// Cria/atualiza as tabelas sozinho, em banco novo ou já existente. Não sobe a API
+	// com o banco fora do esquema esperado.
+	if err := database.AplicarMigracoes(cfg, migracoes.Arquivos); err != nil {
+		log.Fatalf("erro ao aplicar migrations: %v", err)
+	}
 
 	// ─── 3. Inicializa o serviço de armazenamento S3 ─────────────────────────────
 	s3Svc, err := storage.NovoArmazenamentoS3(cfg)
