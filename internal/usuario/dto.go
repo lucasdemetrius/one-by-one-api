@@ -49,10 +49,27 @@ type LoginDTO struct {
 
 // LoginGoogleDTO recebe o "credential" (ID token JWT) devolvido pelo Google Identity
 // Services no front. O backend valida esse token contra o GOOGLE_CLIENT_ID e faz o
-// login (conta existente) ou o cadastro (conta nova de Gestor) por trás.
+// login (conta existente) ou o cadastro (conta nova, com o papel escolhido).
 type LoginGoogleDTO struct {
 	// Credential é o ID token JWT emitido pelo Google (campo "credential" do GIS).
 	Credential string `json:"credential" binding:"required"`
+	// Role é o papel escolhido para CONTA NOVA (LIDER, COLABORADOR ou RH). Ignorado
+	// quando o e-mail já tem conta (entra na conta existente, seja qual for o papel).
+	// Vazio + conta inexistente → a API responde precisa_papel=true e o front mostra
+	// a pergunta "como você vai usar?" antes de repetir a chamada com o papel.
+	Role string `json:"role" binding:"omitempty,oneof=LIDER COLABORADOR RH"`
+}
+
+// LoginGoogleRespostaDTO é a resposta do login com Google. Ou a sessão vem pronta
+// (token + usuario), ou precisa_papel=true — o e-mail ainda não tem conta e o cliente
+// deve perguntar o papel (Gestor/RH/Liderado) e repetir a chamada com Role preenchido.
+type LoginGoogleRespostaDTO struct {
+	// PrecisaPapel indica que o e-mail não tem conta e falta escolher o papel.
+	PrecisaPapel bool `json:"precisa_papel"`
+	// Token é o JWT da sessão (presente só quando o login foi concluído).
+	Token string `json:"token,omitempty"`
+	// Usuario são os dados do usuário autenticado (presente só com o Token).
+	Usuario *UsuarioRespostaDTO `json:"usuario,omitempty"`
 }
 
 // UsuarioRespostaDTO representa os dados do usuário retornados pela API.

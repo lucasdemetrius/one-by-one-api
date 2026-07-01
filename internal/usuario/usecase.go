@@ -58,8 +58,10 @@ type UseCase interface {
 	// Login autentica o usuário com e-mail e senha e retorna um token JWT
 	Login(dto LoginDTO) (LoginRespostaDTO, error)
 	// LoginGoogle autentica via Google (OAuth): valida o ID token do Google e faz
-	// login (conta existente) ou cadastro de Gestor (conta nova). Mesmo JWT do Login.
-	LoginGoogle(dto LoginGoogleDTO) (LoginRespostaDTO, error)
+	// login (conta existente) ou cadastro (conta nova, com o papel escolhido pelo
+	// usuário — Gestor/RH/Liderado). Conta nova sem papel → devolve precisa_papel
+	// para o front perguntar. Mesmo JWT do Login.
+	LoginGoogle(dto LoginGoogleDTO) (LoginGoogleRespostaDTO, error)
 	// UploadFoto envia a foto da PRÓPRIA conta do solicitante para o S3 e persiste a chave.
 	UploadFoto(id string, solicitanteID string, arquivo io.Reader, tamanho int64, tipoConteudo string) (UsuarioRespostaDTO, error)
 	// BuscarPorEmail localiza um usuário ativo pelo e-mail. Uso interno confiável (ex.:
@@ -394,45 +396,63 @@ func (uc *useCaseImpl) gerarTokenLogin(u Usuario) (LoginRespostaDTO, error) {
 	}, nil
 }
 
+// sessaoGoogle embrulha a sessão pronta (JWT + usuário) na resposta do login com Google.
+func (uc *useCaseImpl) sessaoGoogle(u Usuario) (LoginGoogleRespostaDTO, error) {
+	sessao, err := uc.gerarTokenLogin(u)
+	if err != nil {
+		return LoginGoogleRespostaDTO{}, err
+	}
+	return LoginGoogleRespostaDTO{Token: sessao.Token, Usuario: &sessao.Usuario}, nil
+}
+
 // LoginGoogle autentica via Google (OAuth). Valida o ID token do Google e então:
-//   - se já existe uma conta ATIVA com aquele e-mail → faz login (reutiliza a conta);
-//   - se não existe → cria uma conta nova de Gestor (LIDER), com senha aleatória
+//   - e-mail JÁ TEM conta ativa → faz login nela (o papel é o da conta; nada a perguntar);
+//   - e-mail SEM conta e SEM papel escolhido → devolve precisa_papel=true (o front
+//     pergunta "como você vai usar?": Gestor, RH ou Liderado) — regra do produto;
+//   - e-mail SEM conta e COM papel → cria a conta com esse papel, com senha aleatória
 //     inutilizável (a coluna é NOT NULL; login por senha fica impossível para ela).
+//     Gestor/RH nascem com rh_id nulo (solo/raiz, como no /auth/registrar); Liderado
+//     nasce sem vínculo — o vínculo com o gestor continua vindo SÓ do aceite de convite.
 //
 // Emite o MESMO JWT do login por senha. Respeita a regra "1 e-mail = 1 conta" e a
 // reserva do e-mail de ADMIN. Exige GOOGLE_CLIENT_ID configurado e e-mail verificado.
-func (uc *useCaseImpl) LoginGoogle(dto LoginGoogleDTO) (LoginRespostaDTO, error) {
+func (uc *useCaseImpl) LoginGoogle(dto LoginGoogleDTO) (LoginGoogleRespostaDTO, error) {
 	if uc.cfg == nil || uc.cfg.GoogleClientID == "" {
-		return LoginRespostaDTO{}, fmt.Errorf("login com Google não está configurado")
+		return LoginGoogleRespostaDTO{}, fmt.Errorf("login com Google não está configurado")
 	}
 
 	// Valida assinatura + emissor + audiência + prazo do token do Google.
 	dados, err := validarIDTokenGoogle(dto.Credential, uc.cfg.GoogleClientID)
 	if err != nil {
-		return LoginRespostaDTO{}, fmt.Errorf("credenciais inválidas")
+		return LoginGoogleRespostaDTO{}, fmt.Errorf("credenciais inválidas")
 	}
 	// Só aceitamos e-mail JÁ VERIFICADO pelo Google — senão daria para forjar o dono.
 	if !dados.EmailVerified {
-		return LoginRespostaDTO{}, fmt.Errorf("credenciais inválidas")
+		return LoginGoogleRespostaDTO{}, fmt.Errorf("credenciais inválidas")
 	}
 
 	emailNorm := texto.NormalizarEmail(dados.Email)
 
 	// O e-mail do ADMIN é reservado — nunca cria/loga por aqui (anti-escalonamento).
 	if uc.emailReservado(emailNorm) {
-		return LoginRespostaDTO{}, fmt.Errorf("credenciais inválidas")
+		return LoginGoogleRespostaDTO{}, fmt.Errorf("credenciais inválidas")
 	}
 
-	// Já existe conta ativa com esse e-mail? → login (reutiliza a conta).
+	// Já existe conta ativa com esse e-mail? → login nela (1 e-mail = 1 conta).
 	if u, err := uc.repo.BuscarPorEmail(emailNorm); err == nil {
-		return uc.gerarTokenLogin(u)
+		return uc.sessaoGoogle(u)
 	}
 
-	// Não existe → cria conta nova de Gestor (LIDER) com senha aleatória inutilizável.
+	// Conta NOVA sem papel escolhido → o front precisa perguntar (Gestor/RH/Liderado).
+	if dto.Role == "" {
+		return LoginGoogleRespostaDTO{PrecisaPapel: true}, nil
+	}
+
+	// Cria a conta com o papel escolhido e senha aleatória inutilizável.
 	senhaAleatoria := uuid.New().String() + uuid.New().String()
 	hash, err := bcrypt.GenerateFromPassword([]byte(senhaAleatoria), 12)
 	if err != nil {
-		return LoginRespostaDTO{}, fmt.Errorf("erro ao processar conta: %w", err)
+		return LoginGoogleRespostaDTO{}, fmt.Errorf("erro ao processar conta: %w", err)
 	}
 
 	nome := dados.Nome
@@ -445,20 +465,26 @@ func (uc *useCaseImpl) LoginGoogle(dto LoginGoogleDTO) (LoginRespostaDTO, error)
 		Nome:     nome,
 		Email:    emailNorm,
 		Password: string(hash),
-		Role:     "LIDER", // conta nova via Google nasce como Gestor solo (rh_id nulo)
+		Role:     dto.Role, // papel escolhido na pergunta (validado pelo binding: LIDER/COLABORADOR/RH)
 		CriadoEm: time.Now(),
 	})
 	if err != nil {
-		return LoginRespostaDTO{}, fmt.Errorf("erro ao criar conta: %w", err)
+		// Corrida rara: a conta pode ter surgido entre o Buscar e o Criar (UNIQUE do
+		// e-mail no banco). Nesse caso, entra nela em vez de falhar.
+		if u, err2 := uc.repo.BuscarPorEmail(emailNorm); err2 == nil {
+			return uc.sessaoGoogle(u)
+		}
+		return LoginGoogleRespostaDTO{}, fmt.Errorf("erro ao criar conta: %w", err)
 	}
 
-	// Boas-vindas (mesmo template do auto-cadastro); assíncrono e dormente sem SMTP.
-	if uc.emailSvc != nil {
+	// Boas-vindas — mesma regra do cadastro por senha (só para o gestor); assíncrono
+	// e dormente sem SMTP.
+	if criado.Role == "LIDER" && uc.emailSvc != nil {
 		assunto, html := email.TemplateBoasVindas(criado.Nome, uc.cfg.AppURL)
 		go func() { _ = uc.emailSvc.EnviarHTML([]string{criado.Email}, assunto, html) }()
 	}
 
-	return uc.gerarTokenLogin(criado)
+	return uc.sessaoGoogle(criado)
 }
 
 // UploadFoto envia o arquivo para o S3 usando a chave padrão "usuarios/{id}/foto.{ext}",

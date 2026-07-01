@@ -38,12 +38,15 @@ func NovoController(uc UseCase) *Controller {
 
 // RegistrarRotas registra todas as rotas HTTP do módulo de usuários no grupo informado.
 // A rota de login é pública; as demais exigem token JWT válido.
-func (c *Controller) RegistrarRotas(router *gin.RouterGroup, authMiddleware gin.HandlerFunc, protecaoAuth ...gin.HandlerFunc) {
+func (c *Controller) RegistrarRotas(router *gin.RouterGroup, authMiddleware, limiteAuth, recaptchaMW gin.HandlerFunc) {
 	// Rotas públicas — sem auth, mas com rate-limit + reCAPTCHA (anti brute-force/bots).
-	publicas := router.Group("", protecaoAuth...)
+	publicas := router.Group("", limiteAuth, recaptchaMW)
 	publicas.POST("/auth/login", c.Login)
 	publicas.POST("/auth/registrar", c.Registrar)
-	publicas.POST("/auth/google", c.LoginGoogle)
+	// Login com Google: SEM reCAPTCHA de propósito — a autenticação do próprio Google
+	// já barra bots, e o widget anti-robô não acompanha o botão social (se entrasse no
+	// grupo acima, ligar o reCAPTCHA quebraria o login com Google). Rate-limit mantido.
+	router.POST("/auth/google", limiteAuth, c.LoginGoogle)
 
 	// Rotas protegidas — SELF-SERVICE: cada usuário só acessa a PRÓPRIA conta.
 	// A criação/gestão de gestores pelo RH vive no módulo /rh; a de liderados, no
@@ -154,17 +157,20 @@ func (c *Controller) Registrar(ctx *gin.Context) {
 // @Summary      Login com Google
 // @Description  Recebe o "credential" (ID token) do Google Identity Services, valida
 //
-//	no servidor e retorna o mesmo JWT do login por senha. Se o e-mail ainda não tiver
-//	conta, cria uma conta de Gestor (LIDER). Requer GOOGLE_CLIENT_ID configurado.
+//	no servidor e retorna o mesmo JWT do login por senha. Se o e-mail já tem conta,
+//	entra nela (qualquer papel). Se NÃO tem conta: sem "role" no corpo, responde
+//	precisa_papel=true (o cliente pergunta Gestor/RH/Liderado e repete a chamada);
+//	com "role" (LIDER|COLABORADOR|RH), cria a conta com esse papel e já loga.
+//	Requer GOOGLE_CLIENT_ID configurado.
 //
 // @Tags         Autenticação
 // @Accept       json
 // @Produce      json
-// @Param        body  body      LoginGoogleDTO                                   true  "ID token do Google"
-// @Success      200   {object}  response.RespostaPadrao{dados=LoginRespostaDTO}  "Login realizado com sucesso"
-// @Failure      400   {object}  response.ErroPadrao                              "Dados inválidos"
-// @Failure      401   {object}  response.ErroPadrao                              "Credenciais inválidas"
-// @Failure      503   {object}  response.ErroPadrao                              "Login com Google indisponível"
+// @Param        body  body      LoginGoogleDTO                                         true  "ID token do Google (+ papel para conta nova)"
+// @Success      200   {object}  response.RespostaPadrao{dados=LoginGoogleRespostaDTO}  "Sessão pronta OU precisa_papel=true"
+// @Failure      400   {object}  response.ErroPadrao                                    "Dados inválidos"
+// @Failure      401   {object}  response.ErroPadrao                                    "Credenciais inválidas"
+// @Failure      503   {object}  response.ErroPadrao                                    "Login com Google indisponível"
 // @Router       /auth/google [post]
 func (c *Controller) LoginGoogle(ctx *gin.Context) {
 	var dto LoginGoogleDTO
@@ -186,9 +192,18 @@ func (c *Controller) LoginGoogle(ctx *gin.Context) {
 		return
 	}
 
+	// Conta nova sem papel escolhido: ninguém logou ainda — o front mostra a pergunta
+	// "como você vai usar?" (Gestor/RH/Liderado) e repete a chamada com o role.
+	if resultado.PrecisaPapel {
+		response.Sucesso(ctx, resultado)
+		return
+	}
+
 	// Mesmo do Login por senha: atribui o usuário no contexto para o middleware de
 	// auditoria registrar QUEM logou (a rota é pública, sem authMiddleware).
-	ctx.Set(middleware.ChaveUsuarioID, resultado.Usuario.ID)
+	if resultado.Usuario != nil {
+		ctx.Set(middleware.ChaveUsuarioID, resultado.Usuario.ID)
+	}
 
 	response.Sucesso(ctx, resultado)
 }

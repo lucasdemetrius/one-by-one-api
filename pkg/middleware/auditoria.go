@@ -38,6 +38,12 @@ func RegistrarAuditoria(uc AuditoriaUseCase) gin.HandlerFunc {
 			usuarioID = &uid
 		}
 
+		// LOGIN sem usuário identificado = ninguém entrou de fato (ex.: /auth/google
+		// respondendo apenas precisa_papel=true) — não grava linha espúria na trilha.
+		if acao == "LOGIN" && usuarioID == nil {
+			return
+		}
+
 		entidadeID := extrairEntidadeID(ctx)
 
 		uc.Registrar(usuarioID, acao, entidade, entidadeID, ctx.ClientIP(), ctx.GetHeader("User-Agent"))
@@ -66,6 +72,10 @@ func extrairAcaoEntidade(metodo, path string) (acao, entidade string) {
 		case "auth":
 			continue
 		case "login":
+			return "LOGIN", "usuario"
+		case "google":
+			// Login com Google (/auth/google) conta como LOGIN — igual ao /auth/login —
+			// para a trilha e o painel de acessos do admin enxergarem esses acessos.
 			return "LOGIN", "usuario"
 		case "registrar":
 			return "CRIAR", "usuario"

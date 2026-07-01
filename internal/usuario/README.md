@@ -46,6 +46,7 @@ Todas as rotas abaixo ficam sob o prefixo **`/api/v1`** (definido no wireup em `
 |--------|------|-----------|--------------|
 | `POST` | `/api/v1/auth/login` | Autentica com e-mail e senha e retorna um token JWT. | Pública |
 | `POST` | `/api/v1/auth/registrar` | Auto-cadastro público. Cria usuário (role padrão `COLABORADOR`). | Pública |
+| `POST` | `/api/v1/auth/google` | Login com Google (OAuth). Conta existente → entra nela; conta nova → pergunta o papel (ver regras). | Pública (rate-limit, **sem** reCAPTCHA) |
 | `POST` | `/api/v1/usuarios` | Cria um novo usuário (permite definir `role`, inclusive `LIDER`). | JWT |
 | `GET` | `/api/v1/usuarios` | Lista todos os usuários ativos, ordenados por nome. | JWT |
 | `GET` | `/api/v1/usuarios/:id` | Busca um usuário ativo pelo UUID. | JWT |
@@ -83,6 +84,17 @@ Detalhe importante: a diferença entre `POST /auth/registrar` e `POST /usuarios`
 | `email` | `string` | `required`, `email` |
 | `password` | `string` | `required` |
 
+**`LoginGoogleDTO`** (usado em `POST /auth/google`)
+
+| Campo | Tipo | Validação (`binding`) |
+|-------|------|-----------------------|
+| `credential` | `string` | `required` — ID token JWT do Google Identity Services |
+| `role` | `string` | `omitempty`, `oneof=LIDER COLABORADOR RH` — papel para CONTA NOVA (ignorado se o e-mail já tem conta) |
+
+**`LoginGoogleRespostaDTO`** (saída do `POST /auth/google`) — ou a sessão vem pronta
+(`token` + `usuario`), ou `precisa_papel=true` (o e-mail não tem conta; o front pergunta
+"como você vai usar?" e repete a chamada com `role`).
+
 > As tags `binding` são validadas automaticamente pelo Gin no `ShouldBindJSON`. Se a regra falhar, o controller responde `400 Dados inválidos` sem nem chegar à camada de negócio. É parecido com Data Annotations + ModelState.IsValid no ASP.NET.
 
 ### Saída
@@ -119,6 +131,21 @@ Implementadas em `usecase.go`:
 - **Soft delete (exclusão lógica)**: `Deletar` confirma que o usuário existe e delega ao repositório, que preenche `deletado_em` e `deletado_por` em vez de apagar a linha. Todas as queries de leitura filtram por `deletado_em IS NULL`, então registros deletados ficam invisíveis. Como o filtro de e-mail também respeita isso, um e-mail de usuário deletado pode ser reutilizado em um novo cadastro.
 - **Quem deletou é o usuário autenticado**: o controller pega o ID do token JWT (`middleware.ChaveUsuarioID` no contexto Gin) e passa como `deletadoPor`.
 - **Login com mensagem genérica**: tanto e-mail inexistente quanto senha errada retornam o mesmo erro `"credenciais inválidas"`, para não revelar se um e-mail está ou não cadastrado. O controller responde `401`.
+- **Login com Google** (`LoginGoogle`, arquivo `google.go` + `usecase.go`): valida o ID token
+  do Google **no servidor** (assinatura RS256 contra o JWKS do Google, `aud` = `GOOGLE_CLIENT_ID`,
+  emissor e prazo) e exige `email_verified`. Fluxo: **conta existente** → entra nela (qualquer
+  papel — 1 e-mail = 1 conta); **conta nova sem `role`** → responde `precisa_papel=true` (o front
+  pergunta Gestor/RH/Liderado); **conta nova com `role`** → cria com esse papel (Gestor/RH nascem
+  com `rh_id` nulo; Liderado nasce **sem vínculo** — o vínculo continua vindo só do aceite de
+  convite) e loga. A senha da conta criada é aleatória e inutilizável (login por senha impossível).
+  O e-mail do ADMIN é reservado (recusa com `401`). ADMIN nunca pode ser criado (binding `oneof`).
+  A rota fica **fora do reCAPTCHA** de propósito (o Google já barra bots; o widget não acompanha
+  o botão social) — mantém o rate-limit. Emite o MESMO JWT do login por senha. Desligado se
+  `GOOGLE_CLIENT_ID` estiver vazio (o front esconde o botão via `/config`). Para a trilha, o
+  login com Google conta como evento `LOGIN` na auditoria (e `precisa_papel` não gera linha).
+  O cache de chaves do Google (JWKS) recarrega no máximo 1x/min (anti-amplificação). *Dívida
+  consciente:* não verificamos `nonce`/replay do ID token — um token interceptado dentro do
+  prazo (~1h) poderia ser reapresentado; risco baixo com HTTPS de ponta a ponta.
 - **Geração do JWT**: no login, monta `middleware.ClaimsJWT` com `UsuarioID` e `Role`, define expiração (`cfg.JWTExpiracaoHoras` horas) e assina com `HS256` usando `cfg.JWTSecret`.
 - **Upload de foto**: `UploadFoto` valida que o usuário existe, deriva a extensão a partir do `Content-Type` (`extensaoPorTipo`: jpeg→`.jpg`, png→`.png`, webp→`.webp`, padrão `.jpg`), monta a chave `usuarios/{id}/foto.{ext}`, envia ao S3 e salva a chave no banco via `AtualizarFoto`. O controller limita o arquivo a **5MB** e só aceita os tipos `image/jpeg`, `image/png` e `image/webp`.
 - **URL presignada da foto**: `gerarFotoURL` produz uma URL temporária a partir da `foto_key` usando `storage.ExpiracaoURLFoto`. Em caso de erro (ou sem foto / sem serviço de storage), retorna `nil` silenciosamente para não quebrar listagens.

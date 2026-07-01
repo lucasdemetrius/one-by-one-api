@@ -41,11 +41,12 @@ type GoogleClaims struct {
 
 // jwksCacheGoogle guarda as chaves públicas do Google em memória por um tempo,
 // para não bater na rede a cada login. Recarrega quando expira ou quando aparece
-// um kid desconhecido (rotação de chave).
+// um kid desconhecido (rotação de chave) — com um cooldown entre recargas.
 type jwksCacheGoogle struct {
-	mu       sync.Mutex
-	chaves   map[string]*rsa.PublicKey
-	expiraEm time.Time
+	mu          sync.Mutex
+	chaves      map[string]*rsa.PublicKey
+	expiraEm    time.Time
+	ultimaBusca time.Time
 }
 
 var cacheGoogle = &jwksCacheGoogle{}
@@ -55,13 +56,20 @@ func (c *jwksCacheGoogle) obterChave(kid string) (*rsa.PublicKey, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Cache válido e chave presente → usa direto (caminho normal, sem rede).
 	if time.Now().Before(c.expiraEm) {
 		if k, ok := c.chaves[kid]; ok {
 			return k, nil
 		}
 	}
-	if err := c.recarregar(); err != nil {
-		return nil, err
+	// Recarrega NO MÁXIMO 1x por minuto: sem esse cooldown, tokens forjados com um
+	// kid aleatório no header forçariam uma ida ao Google a cada requisição
+	// (amplificação/DoS que ainda seguraria o mutex durante o fetch).
+	if time.Since(c.ultimaBusca) >= time.Minute {
+		c.ultimaBusca = time.Now()
+		if err := c.recarregar(); err != nil {
+			return nil, err
+		}
 	}
 	if k, ok := c.chaves[kid]; ok {
 		return k, nil
