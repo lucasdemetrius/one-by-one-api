@@ -17,6 +17,8 @@ import (
 type Repositorio interface {
 	// Definir insere ou atualiza a classificação de um colaborador (upsert)
 	Definir(c Classificacao) error
+	// Remover apaga a classificação de um colaborador (tira da matriz 9-box)
+	Remover(colaboradorID string) error
 	// ListarPorOrganizacao retorna as classificações dos liderados de uma organização
 	ListarPorOrganizacao(organizacaoID string) ([]Classificacao, error)
 }
@@ -39,6 +41,15 @@ func (r *repositorioMySQL) Definir(c Classificacao) error {
 	            atualizado_em = VALUES(atualizado_em)`
 	if _, err := r.db.Exec(query, c.ColaboradorID, c.Desempenho, c.Potencial, c.AtualizadoEm); err != nil {
 		return fmt.Errorf("erro ao salvar classificação: %w", err)
+	}
+	return nil
+}
+
+func (r *repositorioMySQL) Remover(colaboradorID string) error {
+	// Sem soft delete: a classificação é uma avaliação mutável — remover apenas
+	// volta o liderado para "A classificar" (bandeja). Reclassificar recria a linha.
+	if _, err := r.db.Exec(`DELETE FROM tb_classificacoes WHERE colaborador_id = ?`, colaboradorID); err != nil {
+		return fmt.Errorf("erro ao remover classificação: %w", err)
 	}
 	return nil
 }

@@ -38,6 +38,8 @@ func NovoController(uc UseCase) *Controller {
 func (c *Controller) RegistrarRotas(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
 	// Classificar (definir nota 9-box): só o LÍDER dono (defesa em profundidade + posse no usecase).
 	router.PUT("/colaboradores/:id/classificacao", authMiddleware, middleware.ApenasLider(), c.Definir)
+	// Remover da 9-box (tira o liderado da matriz, volta para "A classificar"): só o LÍDER dono.
+	router.DELETE("/colaboradores/:id/classificacao", authMiddleware, middleware.ApenasLider(), c.Remover)
 	// Listar a 9-box de uma organização: GESTOR dono OU o RH do tenant (visão total, só leitura).
 	// A posse no usecase (OrganizacaoPertenceAoLider) já é RH-aware.
 	router.GET("/organizacoes/:id/classificacoes", authMiddleware, middleware.PermitirGestaoOuRH(), c.ListarPorOrganizacao)
@@ -58,6 +60,17 @@ func (c *Controller) Definir(ctx *gin.Context) {
 		return
 	}
 	response.Sucesso(ctx, res)
+}
+
+// Remover tira um liderado da 9-box (volta para "A classificar").
+func (c *Controller) Remover(ctx *gin.Context) {
+	colaboradorID := ctx.Param("id")
+	usuarioID := ctx.GetString(middleware.ChaveUsuarioID)
+	if err := c.uc.Remover(colaboradorID, usuarioID); err != nil {
+		responderErro(ctx, err)
+		return
+	}
+	response.Sucesso(ctx, gin.H{"removido": true})
 }
 
 // ListarPorOrganizacao devolve as classificações dos liderados da organização.

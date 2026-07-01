@@ -43,6 +43,7 @@ func (c *Controller) RegistrarRotas(router *gin.RouterGroup, authMiddleware gin.
 	publicas := router.Group("", protecaoAuth...)
 	publicas.POST("/auth/login", c.Login)
 	publicas.POST("/auth/registrar", c.Registrar)
+	publicas.POST("/auth/google", c.LoginGoogle)
 
 	// Rotas protegidas — SELF-SERVICE: cada usuário só acessa a PRÓPRIA conta.
 	// A criação/gestão de gestores pelo RH vive no módulo /rh; a de liderados, no
@@ -147,6 +148,49 @@ func (c *Controller) Registrar(ctx *gin.Context) {
 	}
 
 	response.Criado(ctx, resultado)
+}
+
+// LoginGoogle autentica um usuário via Google (OAuth) e retorna um token JWT
+// @Summary      Login com Google
+// @Description  Recebe o "credential" (ID token) do Google Identity Services, valida
+//
+//	no servidor e retorna o mesmo JWT do login por senha. Se o e-mail ainda não tiver
+//	conta, cria uma conta de Gestor (LIDER). Requer GOOGLE_CLIENT_ID configurado.
+//
+// @Tags         Autenticação
+// @Accept       json
+// @Produce      json
+// @Param        body  body      LoginGoogleDTO                                   true  "ID token do Google"
+// @Success      200   {object}  response.RespostaPadrao{dados=LoginRespostaDTO}  "Login realizado com sucesso"
+// @Failure      400   {object}  response.ErroPadrao                              "Dados inválidos"
+// @Failure      401   {object}  response.ErroPadrao                              "Credenciais inválidas"
+// @Failure      503   {object}  response.ErroPadrao                              "Login com Google indisponível"
+// @Router       /auth/google [post]
+func (c *Controller) LoginGoogle(ctx *gin.Context) {
+	var dto LoginGoogleDTO
+	if err := ctx.ShouldBindJSON(&dto); err != nil {
+		response.ErroBind(ctx, err)
+		return
+	}
+
+	resultado, err := c.uc.LoginGoogle(dto)
+	if err != nil {
+		switch err.Error() {
+		case "credenciais inválidas":
+			response.Erro(ctx, http.StatusUnauthorized, "credenciais inválidas")
+		case "login com Google não está configurado":
+			response.Erro(ctx, http.StatusServiceUnavailable, "login com Google não está disponível")
+		default:
+			response.ErroInterno(ctx, err.Error())
+		}
+		return
+	}
+
+	// Mesmo do Login por senha: atribui o usuário no contexto para o middleware de
+	// auditoria registrar QUEM logou (a rota é pública, sem authMiddleware).
+	ctx.Set(middleware.ChaveUsuarioID, resultado.Usuario.ID)
+
+	response.Sucesso(ctx, resultado)
 }
 
 // BuscarPorId retorna os dados de um usuário pelo seu UUID

@@ -110,11 +110,14 @@ func ConfigurarRotas(cfg *config.Config, db *sqlx.DB, s3Svc storage.Armazenament
 		ctx.JSON(200, gin.H{"status": "ok", "versao": "1.0"})
 	})
 
-	// Config pública para o front (ex.: site key do reCAPTCHA, se estiver ligado no .env).
+	// Config pública para o front (ex.: site key do reCAPTCHA e Client ID do Google, se
+	// ligados no .env). O front lê em runtime — não precisa rebuildar quando muda no .env.
 	api.GET("/config", func(ctx *gin.Context) {
 		ctx.JSON(200, gin.H{"sucesso": true, "dados": gin.H{
 			"recaptcha_habilitado": cfg.RecaptchaSecret != "",
 			"recaptcha_site_key":   cfg.RecaptchaSiteKey,
+			"google_habilitado":    cfg.GoogleClientID != "",
+			"google_client_id":     cfg.GoogleClientID,
 		}})
 	})
 

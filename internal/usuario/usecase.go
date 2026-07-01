@@ -57,6 +57,9 @@ type UseCase interface {
 	Deletar(id string, deletadoPor string) error
 	// Login autentica o usuário com e-mail e senha e retorna um token JWT
 	Login(dto LoginDTO) (LoginRespostaDTO, error)
+	// LoginGoogle autentica via Google (OAuth): valida o ID token do Google e faz
+	// login (conta existente) ou cadastro de Gestor (conta nova). Mesmo JWT do Login.
+	LoginGoogle(dto LoginGoogleDTO) (LoginRespostaDTO, error)
 	// UploadFoto envia a foto da PRÓPRIA conta do solicitante para o S3 e persiste a chave.
 	UploadFoto(id string, solicitanteID string, arquivo io.Reader, tamanho int64, tipoConteudo string) (UsuarioRespostaDTO, error)
 	// BuscarPorEmail localiza um usuário ativo pelo e-mail. Uso interno confiável (ex.:
@@ -358,7 +361,14 @@ func (uc *useCaseImpl) Login(dto LoginDTO) (LoginRespostaDTO, error) {
 	// Login OK: zera o contador de falhas e o bloqueio.
 	_ = uc.repo.ZerarFalhaLogin(u.ID)
 
-	// Monta os claims com os dados mínimos necessários para autorização nas demais rotas
+	// Emite o JWT (mesma emissão usada pelo login com Google).
+	return uc.gerarTokenLogin(u)
+}
+
+// gerarTokenLogin monta os claims, assina o JWT (HS256) e devolve o DTO de login.
+// Centraliza a emissão do token para ser reaproveitada pelo login por senha e pelo
+// login com Google — os dois entregam exatamente o mesmo token.
+func (uc *useCaseImpl) gerarTokenLogin(u Usuario) (LoginRespostaDTO, error) {
 	claims := middleware.ClaimsJWT{
 		UsuarioID: u.ID,
 		Role:      u.Role,
@@ -382,6 +392,73 @@ func (uc *useCaseImpl) Login(dto LoginDTO) (LoginRespostaDTO, error) {
 		Token:   tokenString,
 		Usuario: ParaRespostaDTO(u, uc.gerarFotoURL(u.FotoKey)),
 	}, nil
+}
+
+// LoginGoogle autentica via Google (OAuth). Valida o ID token do Google e então:
+//   - se já existe uma conta ATIVA com aquele e-mail → faz login (reutiliza a conta);
+//   - se não existe → cria uma conta nova de Gestor (LIDER), com senha aleatória
+//     inutilizável (a coluna é NOT NULL; login por senha fica impossível para ela).
+//
+// Emite o MESMO JWT do login por senha. Respeita a regra "1 e-mail = 1 conta" e a
+// reserva do e-mail de ADMIN. Exige GOOGLE_CLIENT_ID configurado e e-mail verificado.
+func (uc *useCaseImpl) LoginGoogle(dto LoginGoogleDTO) (LoginRespostaDTO, error) {
+	if uc.cfg == nil || uc.cfg.GoogleClientID == "" {
+		return LoginRespostaDTO{}, fmt.Errorf("login com Google não está configurado")
+	}
+
+	// Valida assinatura + emissor + audiência + prazo do token do Google.
+	dados, err := validarIDTokenGoogle(dto.Credential, uc.cfg.GoogleClientID)
+	if err != nil {
+		return LoginRespostaDTO{}, fmt.Errorf("credenciais inválidas")
+	}
+	// Só aceitamos e-mail JÁ VERIFICADO pelo Google — senão daria para forjar o dono.
+	if !dados.EmailVerified {
+		return LoginRespostaDTO{}, fmt.Errorf("credenciais inválidas")
+	}
+
+	emailNorm := texto.NormalizarEmail(dados.Email)
+
+	// O e-mail do ADMIN é reservado — nunca cria/loga por aqui (anti-escalonamento).
+	if uc.emailReservado(emailNorm) {
+		return LoginRespostaDTO{}, fmt.Errorf("credenciais inválidas")
+	}
+
+	// Já existe conta ativa com esse e-mail? → login (reutiliza a conta).
+	if u, err := uc.repo.BuscarPorEmail(emailNorm); err == nil {
+		return uc.gerarTokenLogin(u)
+	}
+
+	// Não existe → cria conta nova de Gestor (LIDER) com senha aleatória inutilizável.
+	senhaAleatoria := uuid.New().String() + uuid.New().String()
+	hash, err := bcrypt.GenerateFromPassword([]byte(senhaAleatoria), 12)
+	if err != nil {
+		return LoginRespostaDTO{}, fmt.Errorf("erro ao processar conta: %w", err)
+	}
+
+	nome := dados.Nome
+	if nome == "" {
+		nome = emailNorm
+	}
+
+	criado, err := uc.repo.Criar(Usuario{
+		ID:       uuid.New().String(),
+		Nome:     nome,
+		Email:    emailNorm,
+		Password: string(hash),
+		Role:     "LIDER", // conta nova via Google nasce como Gestor solo (rh_id nulo)
+		CriadoEm: time.Now(),
+	})
+	if err != nil {
+		return LoginRespostaDTO{}, fmt.Errorf("erro ao criar conta: %w", err)
+	}
+
+	// Boas-vindas (mesmo template do auto-cadastro); assíncrono e dormente sem SMTP.
+	if uc.emailSvc != nil {
+		assunto, html := email.TemplateBoasVindas(criado.Nome, uc.cfg.AppURL)
+		go func() { _ = uc.emailSvc.EnviarHTML([]string{criado.Email}, assunto, html) }()
+	}
+
+	return uc.gerarTokenLogin(criado)
 }
 
 // UploadFoto envia o arquivo para o S3 usando a chave padrão "usuarios/{id}/foto.{ext}",

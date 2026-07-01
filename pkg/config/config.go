@@ -81,6 +81,11 @@ type Config struct {
 	// ou no conteúdo curado. Provedor: CLAUDE | OPENAI | DEEPSEEK | GROK.
 	IAPlataformaProvedor string
 	IAPlataformaChave    string
+	// ── Login com Google (OAuth) — opcional. Vazio = login com Google desligado. ──
+	// GoogleClientID é o Client ID do "Aplicativo da Web" criado no Google Cloud
+	// Console. É público (não é segredo): o backend valida o ID token do Google
+	// contra ele (audience) e o front usa para renderizar o botão "Entrar com Google".
+	GoogleClientID string
 }
 
 // Carregar lê as variáveis de ambiente do arquivo .env (ou do ambiente do sistema)
@@ -138,6 +143,7 @@ func Carregar() (*Config, error) {
 		AdminSenha:           getEnv("ADMIN_SENHA", ""),
 		IAPlataformaProvedor: getEnv("IA_PLATAFORMA_PROVEDOR", ""),
 		IAPlataformaChave:    getEnv("IA_PLATAFORMA_CHAVE", ""),
+		GoogleClientID:       getEnv("GOOGLE_CLIENT_ID", ""),
 	}
 
 	// Travas de segurança (fail-fast): o app NÃO sobe com configuração insegura.

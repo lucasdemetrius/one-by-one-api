@@ -47,6 +47,14 @@ type LoginDTO struct {
 	Password string `json:"password" binding:"required"`
 }
 
+// LoginGoogleDTO recebe o "credential" (ID token JWT) devolvido pelo Google Identity
+// Services no front. O backend valida esse token contra o GOOGLE_CLIENT_ID e faz o
+// login (conta existente) ou o cadastro (conta nova de Gestor) por trás.
+type LoginGoogleDTO struct {
+	// Credential é o ID token JWT emitido pelo Google (campo "credential" do GIS).
+	Credential string `json:"credential" binding:"required"`
+}
+
 // UsuarioRespostaDTO representa os dados do usuário retornados pela API.
 // Nunca expõe campos sensíveis como a senha ou metadados de soft delete.
 type UsuarioRespostaDTO struct {

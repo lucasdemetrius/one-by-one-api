@@ -21,6 +21,7 @@ var ErrAcessoNegado = errors.New("colaborador não encontrado")
 // do líder logado e validam a posse (avaliação de RH é exclusiva do gestor dono).
 type UseCase interface {
 	Definir(colaboradorID string, dto DefinirClassificacaoDTO, usuarioID string) (ClassificacaoRespostaDTO, error)
+	Remover(colaboradorID string, usuarioID string) error
 	ListarPorOrganizacao(organizacaoID string, usuarioID string) ([]ClassificacaoRespostaDTO, error)
 }
 
@@ -59,6 +60,18 @@ func (uc *useCaseImpl) Definir(colaboradorID string, dto DefinirClassificacaoDTO
 		Desempenho:    c.Desempenho,
 		Potencial:     c.Potencial,
 	}, nil
+}
+
+func (uc *useCaseImpl) Remover(colaboradorID string, usuarioID string) error {
+	// POSSE: só o líder dono do liderado pode tirá-lo da 9-box.
+	dono, err := uc.colaboradorUC.PertenceAoLider(colaboradorID, usuarioID)
+	if err != nil {
+		return err
+	}
+	if !dono {
+		return ErrAcessoNegado
+	}
+	return uc.repo.Remover(colaboradorID)
 }
 
 func (uc *useCaseImpl) ListarPorOrganizacao(organizacaoID string, usuarioID string) ([]ClassificacaoRespostaDTO, error) {
