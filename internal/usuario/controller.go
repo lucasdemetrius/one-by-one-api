@@ -159,8 +159,8 @@ func (c *Controller) Registrar(ctx *gin.Context) {
 //
 //	no servidor e retorna o mesmo JWT do login por senha. Se o e-mail já tem conta,
 //	entra nela (qualquer papel). Se NÃO tem conta: sem "role" no corpo, responde
-//	precisa_papel=true (o cliente pergunta Gestor/RH/Liderado e repete a chamada);
-//	com "role" (LIDER|COLABORADOR|RH), cria a conta com esse papel e já loga.
+//	precisa_papel=true (o cliente pergunta Gestor/RH e repete a chamada); com "role"
+//	(LIDER|RH — liderado entra por convite), cria a conta com esse papel e já loga.
 //	Requer GOOGLE_CLIENT_ID configurado.
 //
 // @Tags         Autenticação
@@ -181,10 +181,13 @@ func (c *Controller) LoginGoogle(ctx *gin.Context) {
 
 	resultado, err := c.uc.LoginGoogle(dto)
 	if err != nil {
-		switch err.Error() {
-		case "credenciais inválidas":
+		switch {
+		case errors.Is(err, ErrPapelInvalidoNoCadastro):
+			// Papel não permitido em conta nova via Google (ex.: COLABORADOR) → 400.
+			response.ErroRequisicao(ctx, err.Error())
+		case err.Error() == "credenciais inválidas":
 			response.Erro(ctx, http.StatusUnauthorized, "credenciais inválidas")
-		case "login com Google não está configurado":
+		case err.Error() == "login com Google não está configurado":
 			response.Erro(ctx, http.StatusServiceUnavailable, "login com Google não está disponível")
 		default:
 			response.ErroInterno(ctx, err.Error())

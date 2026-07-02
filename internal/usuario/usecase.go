@@ -58,9 +58,9 @@ type UseCase interface {
 	// Login autentica o usuário com e-mail e senha e retorna um token JWT
 	Login(dto LoginDTO) (LoginRespostaDTO, error)
 	// LoginGoogle autentica via Google (OAuth): valida o ID token do Google e faz
-	// login (conta existente) ou cadastro (conta nova, com o papel escolhido pelo
-	// usuário — Gestor/RH/Liderado). Conta nova sem papel → devolve precisa_papel
-	// para o front perguntar. Mesmo JWT do Login.
+	// login (conta existente, qualquer papel) ou cadastro (conta nova — só Gestor/RH;
+	// liderado entra por convite). Conta nova sem papel → devolve precisa_papel para o
+	// front perguntar. Mesmo JWT do Login.
 	LoginGoogle(dto LoginGoogleDTO) (LoginGoogleRespostaDTO, error)
 	// UploadFoto envia a foto da PRÓPRIA conta do solicitante para o S3 e persiste a chave.
 	UploadFoto(id string, solicitanteID string, arquivo io.Reader, tamanho int64, tipoConteudo string) (UsuarioRespostaDTO, error)
@@ -412,11 +412,11 @@ func (uc *useCaseImpl) sessaoGoogle(u Usuario) (LoginGoogleRespostaDTO, error) {
 // LoginGoogle autentica via Google (OAuth). Valida o ID token do Google e então:
 //   - e-mail JÁ TEM conta ativa → faz login nela (o papel é o da conta; nada a perguntar);
 //   - e-mail SEM conta e SEM papel escolhido → devolve precisa_papel=true (o front
-//     pergunta "como você vai usar?": Gestor, RH ou Liderado) — regra do produto;
-//   - e-mail SEM conta e COM papel → cria a conta com esse papel, com senha aleatória
-//     inutilizável (a coluna é NOT NULL; login por senha fica impossível para ela).
-//     Gestor/RH nascem com rh_id nulo (solo/raiz, como no /auth/registrar); Liderado
-//     nasce sem vínculo — o vínculo com o gestor continua vindo SÓ do aceite de convite.
+//     pergunta "como você vai usar?": Gestor ou RH) — regra do produto;
+//   - e-mail SEM conta e COM papel (só LIDER/RH) → cria a conta com esse papel, com
+//     senha aleatória inutilizável (coluna NOT NULL; login por senha fica impossível).
+//     Nascem com rh_id nulo (solo/raiz, como no /auth/registrar). Liderado (COLABORADOR)
+//     NÃO se auto-cadastra por aqui: entra apenas pelo aceite de convite.
 //
 // Emite o MESMO JWT do login por senha. Respeita a regra "1 e-mail = 1 conta" e a
 // reserva do e-mail de ADMIN. Exige GOOGLE_CLIENT_ID configurado e e-mail verificado.
@@ -447,9 +447,15 @@ func (uc *useCaseImpl) LoginGoogle(dto LoginGoogleDTO) (LoginGoogleRespostaDTO, 
 		return uc.sessaoGoogle(u)
 	}
 
-	// Conta NOVA sem papel escolhido → o front precisa perguntar (Gestor/RH/Liderado).
+	// Conta NOVA sem papel escolhido → o front precisa perguntar (Gestor/RH).
 	if dto.Role == "" {
 		return LoginGoogleRespostaDTO{PrecisaPapel: true}, nil
+	}
+
+	// Liderado (COLABORADOR) NUNCA se auto-cadastra — entra só por convite. Via Google,
+	// conta nova só pode ser Gestor (LIDER) ou RH (mesma regra do /auth/registrar).
+	if dto.Role != "LIDER" && dto.Role != "RH" {
+		return LoginGoogleRespostaDTO{}, ErrPapelInvalidoNoCadastro
 	}
 
 	// Cria a conta com o papel escolhido e senha aleatória inutilizável.

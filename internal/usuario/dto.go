@@ -53,11 +53,12 @@ type LoginDTO struct {
 type LoginGoogleDTO struct {
 	// Credential é o ID token JWT emitido pelo Google (campo "credential" do GIS).
 	Credential string `json:"credential" binding:"required"`
-	// Role é o papel escolhido para CONTA NOVA (LIDER, COLABORADOR ou RH). Ignorado
-	// quando o e-mail já tem conta (entra na conta existente, seja qual for o papel).
+	// Role é o papel escolhido para CONTA NOVA — só LIDER (Gestor) ou RH. Liderado
+	// (COLABORADOR) NÃO se auto-cadastra: entra apenas por convite. Ignorado quando o
+	// e-mail já tem conta (entra na conta existente, seja qual for o papel).
 	// Vazio + conta inexistente → a API responde precisa_papel=true e o front mostra
-	// a pergunta "como você vai usar?" antes de repetir a chamada com o papel.
-	Role string `json:"role" binding:"omitempty,oneof=LIDER COLABORADOR RH"`
+	// a pergunta "como você vai usar?" (Gestor/RH) antes de repetir a chamada com o papel.
+	Role string `json:"role" binding:"omitempty,oneof=LIDER RH"`
 }
 
 // LoginGoogleRespostaDTO é a resposta do login com Google. Ou a sessão vem pronta

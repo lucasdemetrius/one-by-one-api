@@ -89,7 +89,7 @@ Detalhe importante: a diferença entre `POST /auth/registrar` e `POST /usuarios`
 | Campo | Tipo | Validação (`binding`) |
 |-------|------|-----------------------|
 | `credential` | `string` | `required` — ID token JWT do Google Identity Services |
-| `role` | `string` | `omitempty`, `oneof=LIDER COLABORADOR RH` — papel para CONTA NOVA (ignorado se o e-mail já tem conta) |
+| `role` | `string` | `omitempty`, `oneof=LIDER RH` — papel para CONTA NOVA (só Gestor/RH; liderado entra por convite). Ignorado se o e-mail já tem conta |
 
 **`LoginGoogleRespostaDTO`** (saída do `POST /auth/google`) — ou a sessão vem pronta
 (`token` + `usuario`), ou `precisa_papel=true` (o e-mail não tem conta; o front pergunta
@@ -135,9 +135,9 @@ Implementadas em `usecase.go`:
   do Google **no servidor** (assinatura RS256 contra o JWKS do Google, `aud` = `GOOGLE_CLIENT_ID`,
   emissor e prazo) e exige `email_verified`. Fluxo: **conta existente** → entra nela (qualquer
   papel — 1 e-mail = 1 conta); **conta nova sem `role`** → responde `precisa_papel=true` (o front
-  pergunta Gestor/RH/Liderado); **conta nova com `role`** → cria com esse papel (Gestor/RH nascem
-  com `rh_id` nulo; Liderado nasce **sem vínculo** — o vínculo continua vindo só do aceite de
-  convite) e loga. A senha da conta criada é aleatória e inutilizável (login por senha impossível).
+  pergunta **Gestor/RH**); **conta nova com `role`** → cria com esse papel (só **LIDER/RH**, com
+  `rh_id` nulo). O **liderado (COLABORADOR) NÃO se auto-cadastra** — nem por senha nem por Google;
+  entra apenas pelo aceite de convite. A senha da conta criada é aleatória e inutilizável (login por senha impossível).
   O e-mail do ADMIN é reservado (recusa com `401`). ADMIN nunca pode ser criado (binding `oneof`).
   A rota fica **fora do reCAPTCHA** de propósito (o Google já barra bots; o widget não acompanha
   o botão social) — mantém o rate-limit. Emite o MESMO JWT do login por senha. Desligado se
