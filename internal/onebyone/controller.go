@@ -104,7 +104,8 @@ func (c *Controller) Criar(ctx *gin.Context) {
 
 	resultado, err := c.uc.Criar(usuarioID, dto)
 	if err != nil {
-		response.ErroInterno(ctx, err.Error())
+		// Falta de posse (colaborador de outro líder) → 404, não 500.
+		responderErro(ctx, err)
 		return
 	}
 	response.Criado(ctx, resultado)

@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +24,29 @@ import (
 
 // ErrAcessoNegado: falta de posse. Mensagem "não encontrado" → controller responde 404.
 var ErrAcessoNegado = errors.New("conteúdo não encontrado")
+
+// ErrURLInvalida: o link de um bloco LINK tem esquema não permitido (só http/https/
+// mailto). Barra XSS por href "javascript:" (defesa em profundidade — o front também
+// sanitiza). O controller mapeia para 400.
+var ErrURLInvalida = errors.New("link inválido: use um endereço http(s)")
+
+// urlComEsquemaSeguro valida que a URL usa http, https ou mailto (nada de javascript:,
+// data:, etc.). Vazio/nil é aceito (o campo é opcional conforme o tipo do bloco).
+func urlComEsquemaSeguro(u *string) bool {
+	if u == nil || strings.TrimSpace(*u) == "" {
+		return true
+	}
+	parsed, err := url.Parse(strings.TrimSpace(*u))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "mailto":
+		return true
+	default:
+		return false
+	}
+}
 
 // UseCase define as operações de negócio dos blocos de tema. Todas recebem o
 // usuarioID do chamador e validam a posse (líder dono OU o próprio liderado,
@@ -140,6 +165,11 @@ func (uc *useCaseImpl) Listar(colaboradorID, tema, usuarioID string) ([]BlocoRes
 func (uc *useCaseImpl) Criar(colaboradorID string, dto CriarBlocoDTO, usuarioID string) (BlocoRespostaDTO, error) {
 	if err := uc.garantirPosse(colaboradorID, usuarioID); err != nil {
 		return BlocoRespostaDTO{}, err
+	}
+
+	// Segurança: bloco LINK não pode ter esquema perigoso (ex.: javascript:) — anti-XSS.
+	if dto.Tipo == "LINK" && !urlComEsquemaSeguro(dto.URL) {
+		return BlocoRespostaDTO{}, ErrURLInvalida
 	}
 
 	ordem, _ := uc.repo.ProximaOrdem(colaboradorID, dto.Tema)

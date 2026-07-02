@@ -16,10 +16,15 @@ import (
 	"onebyone-api/pkg/response"
 )
 
-// responderErro traduz falta de posse (ErrAcessoNegado) em 404 e o resto em 500.
+// responderErro traduz falta de posse (ErrAcessoNegado) em 404, link inválido em 400
+// e o resto em 500.
 func responderErro(ctx *gin.Context, err error) {
 	if errors.Is(err, ErrAcessoNegado) {
 		response.ErroNaoEncontrado(ctx, "conteúdo não encontrado")
+		return
+	}
+	if errors.Is(err, ErrURLInvalida) {
+		response.ErroRequisicao(ctx, err.Error())
 		return
 	}
 	response.ErroInterno(ctx, err.Error())

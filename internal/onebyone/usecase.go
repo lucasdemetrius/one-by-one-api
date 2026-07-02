@@ -107,6 +107,23 @@ func NovoUseCase(repo Repositorio, colabUC PosseColaborador) UseCase {
 
 // Criar valida a data agendada, gera UUID e persiste a nova reunião com status AGENDADO
 func (uc *useCaseImpl) Criar(usuarioID string, dto CriarOneByOneDTO) (OneByOneRespostaDTO, error) {
+	// POSSE (Cadeia B): o 1:1 só pode ser criado para um liderado do próprio gestor.
+	// Sem isto, um líder poderia criar reuniões apontando para colaborador/equipe/
+	// organização de OUTRO líder (IDOR de escrita — polui métricas e a herança de
+	// template). Recurso alheio → 404. Mesma checagem do Encerrar.
+	dono, err := uc.colabUC.PertenceAoLider(dto.ColaborID, usuarioID)
+	if err != nil || !dono {
+		return OneByOneRespostaDTO{}, ErrAcessoNegado
+	}
+
+	// A estrutura (organização/equipe) NÃO vem do corpo (evita FKs cross-tenant): é
+	// derivada do próprio colaborador, já validado como do gestor. Os campos
+	// OrganizacaoID/EquipeID do DTO são ignorados de propósito.
+	col, err := uc.colabUC.BuscarPorId(dto.ColaborID, usuarioID)
+	if err != nil {
+		return OneByOneRespostaDTO{}, ErrAcessoNegado
+	}
+
 	// Converte a data agendada do formato string "YYYY-MM-DD" para time.Time
 	dataAgendada, err := time.Parse("2006-01-02", dto.DataAgendada)
 	if err != nil {
@@ -122,8 +139,8 @@ func (uc *useCaseImpl) Criar(usuarioID string, dto CriarOneByOneDTO) (OneByOneRe
 	novaReuniao := OneByOne{
 		ID:            uuid.New().String(),
 		UsuarioID:     usuarioID,
-		OrganizacaoID: dto.OrganizacaoID,
-		EquipeID:      dto.EquipeID,
+		OrganizacaoID: col.OrganizacaoID,
+		EquipeID:      col.EquipeID,
 		ColaborID:     dto.ColaborID,
 		Recorrencia:   recorrencia,
 		Status:        "AGENDADO", // toda reunião começa com status AGENDADO

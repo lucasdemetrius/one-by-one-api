@@ -160,6 +160,12 @@ func Carregar() (*Config, error) {
 		if !strings.HasPrefix(cfg.AppURL, "https://") {
 			return nil, fmt.Errorf("APP_URL precisa ser https em produção (ex.: https://seudominio.com)")
 		}
+		// reCAPTCHA é opcional (toggle via .env), mas em produção sem ele o login/
+		// cadastro/recuperação ficam só com rate-limit por IP contra bots. Não quebra
+		// o boot (decisão do operador), mas avisa em alto e bom som no log.
+		if cfg.RecaptchaSecret == "" {
+			fmt.Fprintln(os.Stderr, "[AVISO SEGURANÇA] RECAPTCHA_SECRET vazio em produção: login/cadastro/recuperação SEM proteção anti-bot (apenas rate-limit por IP). Preencha RECAPTCHA_SITE_KEY e RECAPTCHA_SECRET para ativar.")
+		}
 	}
 
 	return cfg, nil

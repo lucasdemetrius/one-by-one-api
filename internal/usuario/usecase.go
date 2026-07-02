@@ -176,6 +176,10 @@ func (uc *useCaseImpl) RedefinirSenha(usuarioID, novaSenha string) error {
 	}
 	// Senha trocada → invalida todos os tokens antigos (revogação de sessão).
 	_ = uc.repo.IncrementarVersaoToken(usuarioID)
+	// E zera o lockout: quem redefiniu a senha (provando posse do e-mail) deve poder
+	// entrar na hora. Sem isto, um bloqueio malicioso (5 senhas erradas repetidas) não
+	// teria escape, pois o Login barra por bloqueado_ate antes de conferir a senha.
+	_ = uc.repo.ZerarFalhaLogin(usuarioID)
 	return nil
 }
 
