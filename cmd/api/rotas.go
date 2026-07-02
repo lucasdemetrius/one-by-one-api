@@ -276,9 +276,19 @@ func ConfigurarRotas(cfg *config.Config, db *sqlx.DB, s3Svc storage.Armazenament
 	tabuleiroController.RegistrarRotas(api, authMiddleware)
 
 	// ─── Módulo: ia (BYOK — IA do gestor) ────────────────────────────────────────
-	// Guarda o provedor + a chave cifrada (segredo = JWT_SECRET) e expõe config/chat.
+	// Guarda o provedor + a chave cifrada e expõe config/chat. Segredo de cifragem:
+	// IA_CRIPTO_SECRET (dedicado) se definido, senão o JWT_SECRET (retrocompatível).
+	// O JWT_SECRET entra como fallback de decifra para não quebrar chaves já salvas
+	// caso se migre para o segredo dedicado.
+	iaSegredo := cfg.IACriptoSecret
+	iaFallback := ""
+	if iaSegredo == "" {
+		iaSegredo = cfg.JWTSecret
+	} else {
+		iaFallback = cfg.JWTSecret
+	}
 	iaRepo := ia.NovoRepositorio(db)
-	iaUseCase := ia.NovoUseCase(iaRepo, cfg.JWTSecret)
+	iaUseCase := ia.NovoUseCase(iaRepo, iaSegredo, iaFallback)
 	iaController := ia.NovoController(iaUseCase)
 	iaController.RegistrarRotas(api, authMiddleware)
 

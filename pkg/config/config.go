@@ -86,6 +86,11 @@ type Config struct {
 	// Console. É público (não é segredo): o backend valida o ID token do Google
 	// contra ele (audience) e o front usa para renderizar o botão "Entrar com Google".
 	GoogleClientID string
+	// IACriptoSecret é o segredo dedicado à cifragem das chaves de API de IA (BYOK)
+	// em repouso. Se vazio, cai no JWT_SECRET (retrocompatível). Preenchê-lo desacopla
+	// os domínios: um vazamento do JWT_SECRET não expõe as chaves de IA, e rotacionar o
+	// JWT não invalida as chaves já cifradas (o código tenta o fallback ao decifrar).
+	IACriptoSecret string
 }
 
 // Carregar lê as variáveis de ambiente do arquivo .env (ou do ambiente do sistema)
@@ -144,6 +149,7 @@ func Carregar() (*Config, error) {
 		IAPlataformaProvedor: getEnv("IA_PLATAFORMA_PROVEDOR", ""),
 		IAPlataformaChave:    getEnv("IA_PLATAFORMA_CHAVE", ""),
 		GoogleClientID:       getEnv("GOOGLE_CLIENT_ID", ""),
+		IACriptoSecret:       getEnv("IA_CRIPTO_SECRET", ""),
 	}
 
 	// Travas de segurança (fail-fast): o app NÃO sobe com configuração insegura.

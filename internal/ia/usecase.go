@@ -37,13 +37,18 @@ type UseCase interface {
 
 type useCaseImpl struct {
 	repo Repositorio
-	// segredo do servidor usado para cifrar/decifrar a chave de API.
+	// segredo do servidor usado para CIFRAR (e como 1ª tentativa ao decifrar) a chave de API.
 	segredo string
+	// segredoFallback: 2ª tentativa ao decifrar. Permite migrar do JWT_SECRET para um
+	// segredo dedicado sem quebrar chaves já salvas (as antigas decifram pelo fallback;
+	// ao serem regravadas passam a usar o segredo novo).
+	segredoFallback string
 }
 
-// NovoUseCase cria o UseCase de IA. `segredo` deve ser estável (ex.: JWT_SECRET).
-func NovoUseCase(repo Repositorio, segredo string) UseCase {
-	return &useCaseImpl{repo: repo, segredo: segredo}
+// NovoUseCase cria o UseCase de IA. `segredo` é o usado para cifrar; `segredoFallback`
+// (opcional) só é tentado ao decifrar valores antigos. Ambos devem ser estáveis.
+func NovoUseCase(repo Repositorio, segredo, segredoFallback string) UseCase {
+	return &useCaseImpl{repo: repo, segredo: segredo, segredoFallback: segredoFallback}
 }
 
 func (uc *useCaseImpl) ObterConfig(usuarioID string) (ConfigIARespostaDTO, error) {
@@ -88,7 +93,7 @@ func (uc *useCaseImpl) Completar(usuarioID, sistema, prompt string) (string, err
 	if prov == nil || *prov == "" || chaveCif == nil || *chaveCif == "" {
 		return "", ErrSemConfig
 	}
-	chave, err := cripto.Decifrar(*chaveCif, uc.segredo)
+	chave, err := cripto.DecifrarComFallback(*chaveCif, uc.segredo, uc.segredoFallback)
 	if err != nil {
 		return "", fmt.Errorf("erro ao ler a chave de IA: %w", err)
 	}

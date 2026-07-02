@@ -44,6 +44,23 @@ func Cifrar(textoPuro, segredo string) (string, error) {
 	return base64.StdEncoding.EncodeToString(cifrado), nil
 }
 
+// DecifrarComFallback tenta decifrar com o segredo primário e, se falhar, com o
+// fallback (quando informado). Serve para migrar o segredo de cifragem sem quebrar
+// dados já cifrados com o segredo antigo: passa-se o segredo novo como primário e o
+// antigo como fallback; o que for regravado passa a usar o novo.
+func DecifrarComFallback(base64Cifrado, segredo, fallback string) (string, error) {
+	texto, err := Decifrar(base64Cifrado, segredo)
+	if err == nil {
+		return texto, nil
+	}
+	if fallback != "" && fallback != segredo {
+		if texto2, err2 := Decifrar(base64Cifrado, fallback); err2 == nil {
+			return texto2, nil
+		}
+	}
+	return "", err
+}
+
 // Decifrar reverte o Cifrar, devolvendo o texto puro original.
 func Decifrar(base64Cifrado, segredo string) (string, error) {
 	dados, err := base64.StdEncoding.DecodeString(base64Cifrado)
